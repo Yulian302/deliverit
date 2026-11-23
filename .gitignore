@@ -1,3 +1,9 @@
 # personal
 PLANNING.md
 
+# build & test output
+bin/
+coverage.out
+
+# agent scratch workspace
+.superpowers/

@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - revive
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # Shared code must stay generic: it may never depend on a service.
+        platform-is-generic:
+          files:
+            - "**/platform/**"
+          deny:
+            - pkg: github.com/Yulian302/deliverit/services
+              desc: platform/ must not import service code
+        # Services talk over RPC/events only, never by importing each other.
+        gateway-boundary:
+          files:
+            - "**/services/gateway/**"
+          deny:
+            - pkg: github.com/Yulian302/deliverit/services/order
+              desc: services must not import each other; use the RPC contract in gen/
+        order-boundary:
+          files:
+            - "**/services/order/**"
+          deny:
+            - pkg: github.com/Yulian302/deliverit/services/gateway
+              desc: services must not import each other; use the RPC contract in gen/
