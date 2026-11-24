@@ -166,3 +166,45 @@ func TestHTTPHandler_ContinuesIncomingTrace(t *testing.T) {
 		t.Error("span parent is not marked remote")
 	}
 }
+
+// At the public edge a traceparent comes from the internet: anyone could
+// attach their requests to arbitrary trace IDs or choose our sampling. So the
+// public handler starts a NEW trace and only links to the caller's span.
+func TestPublicHTTPHandler_StartsNewTraceLinkedToCaller(t *testing.T) {
+	exp, shutdown := setupInMemory(t)
+
+	const (
+		clientTraceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+		clientSpanID  = "00f067aa0ba902b7"
+	)
+	var inHandler trace.SpanContext
+	h := telemetry.PublicHTTPHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		inHandler = trace.SpanContextFromContext(r.Context())
+	}), "test-op")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/restaurants", nil)
+	req.Header.Set("traceparent", "00-"+clientTraceID+"-"+clientSpanID+"-01")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !inHandler.IsValid() {
+		t.Fatal("handler has no span: the request isn't traced at all")
+	}
+	if inHandler.TraceID().String() == clientTraceID {
+		t.Error("public handler continued the client's trace ID; it must start its own")
+	}
+
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("exported %d spans, want 1", len(spans))
+	}
+	s := spans[0]
+	if s.Parent.IsValid() {
+		t.Errorf("span has parent %s, want a new root", s.Parent.SpanID())
+	}
+	if len(s.Links) != 1 || s.Links[0].SpanContext.SpanID().String() != clientSpanID {
+		t.Errorf("links = %v, want one link to the client's span %s", s.Links, clientSpanID)
+	}
+}

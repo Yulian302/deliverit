@@ -131,6 +131,23 @@ func Setup(ctx context.Context, o Options) (Shutdown, error) {
 // HTTPHandler wraps h so every incoming request gets a SERVER span that
 // continues the caller's trace (from traceparent) and records HTTP request
 // metrics. operation names the span when no route pattern is known.
+//
+// Use it for internal endpoints, called only by our own services. For
+// endpoints reachable from the internet, use PublicHTTPHandler.
 func HTTPHandler(h http.Handler, operation string) http.Handler {
 	return otelhttp.NewHandler(h, operation)
+}
+
+// PublicHTTPHandler is HTTPHandler for internet-facing endpoints: it never
+// continues a caller's trace. Each request starts a NEW trace whose root span
+// links to the caller's span (if any), so the connection stays visible.
+//
+// Why: a traceparent from the internet is untrusted input. Continuing it
+// would let anyone attach their requests to arbitrary trace IDs, or choose
+// our sampling decision (its "sampled" flag). Trust inside, distrust at the
+// edge.
+func PublicHTTPHandler(h http.Handler, operation string) http.Handler {
+	return otelhttp.NewHandler(h, operation,
+		otelhttp.WithPublicEndpointFn(func(*http.Request) bool { return true }),
+	)
 }

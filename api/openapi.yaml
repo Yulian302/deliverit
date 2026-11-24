@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+  title: DeliverIt public API
+  version: 0.1.0
+  description: |
+    The public REST API, served by the Gateway. Internal services talk
+    Connect-RPC (see proto/); this document is what browsers and apps rely on.
+
+    Errors use RFC 9457 problem details (`application/problem+json`) with a
+    stable machine-readable `code`. Switch on `code`, never on `detail`.
+
+    Every response carries `X-Request-ID` (yours if well-formed, otherwise
+    generated). Every request answers within 5 seconds or gets a 504.
+servers:
+  - url: http://localhost:8080
+    description: local (make run-gateway)
+
+paths:
+  /v1/restaurants:
+    get:
+      operationId: listRestaurants
+      summary: Restaurants near a point, nearest first
+      parameters:
+        - name: near
+          in: query
+          required: true
+          description: Search centre as `lat,lng` in degrees (lat −90..90, lng −180..180).
+          schema:
+            type: string
+            pattern: '^-?\d+(\.\d+)?,-?\d+(\.\d+)?$'
+          example: 50.4501,30.5234
+        - name: radiusKm
+          in: query
+          required: false
+          description: Search radius in km, 0 < radiusKm ≤ 20. Default 5.
+          schema:
+            type: number
+            exclusiveMinimum: 0
+            maximum: 20
+            default: 5
+        - name: limit
+          in: query
+          required: false
+          description: Maximum results, 1..50. Default 20.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: Matching restaurants, nearest first (an empty array if none).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [restaurants]
+                properties:
+                  restaurants:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Restaurant"
+              example:
+                restaurants:
+                  - id: 0193a1b0-0000-7000-8000-000000000001
+                    name: Khreshchatyk Kitchen
+                    lat: 50.448
+                    lng: 30.522
+                    prepMinutes: 15
+                    distanceKm: 0.2537
+        "400":
+          description: "Malformed or out-of-range parameters. code: invalid_argument"
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                code: invalid_argument
+                detail: near is required, as near=lat,lng
+        "502":
+          description: "The restaurant service failed. code: upstream_error"
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "503":
+          description: "The restaurant service is unreachable; retry later. code: upstream_unavailable"
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "504":
+          description: "The restaurant service did not answer within 5 seconds. code: upstream_timeout"
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+components:
+  schemas:
+    Restaurant:
+      type: object
+      required: [id, name, lat, lng, prepMinutes, distanceKm]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        lat: { type: number, description: Latitude in degrees }
+        lng: { type: number, description: Longitude in degrees }
+        prepMinutes: { type: integer, description: Typical preparation time in minutes }
+        distanceKm: { type: number, description: Great-circle distance from `near`, in km }
+    Problem:
+      description: RFC 9457 problem details, plus a stable `code`.
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, description: 'Always "about:blank" for now' }
+        title: { type: string, description: The HTTP status text }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [invalid_argument, upstream_unavailable, upstream_timeout, upstream_error, internal]
+        detail: { type: string, description: Human-readable explanation; never internal details }
