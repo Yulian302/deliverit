@@ -6,6 +6,7 @@ toolchain go1.26.7
 
 require (
 	connectrpc.com/connect v1.21.1
+	connectrpc.com/otelconnect v0.12.0
 	github.com/caarlos0/env/v11 v11.4.2
 	github.com/exaring/otelpgx v0.13.0
 	github.com/google/uuid v1.6.0
@@ -24,6 +25,7 @@ require (
 )
 
 require (
+	connectrpc.com/connect/v2 v2.0.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20261006220739-8c912ac31dd4 // indirect
 	github.com/Microsoft/go-winio v0.6.4 // indirect

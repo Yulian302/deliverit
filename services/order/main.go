@@ -1,6 +1,6 @@
 // Command order runs the Order service.
 //
-//	order            serve: RPC API (added in Tasks 6–8), /livez, /readyz
+//	order            serve: OrderService RPC API, /livez, /readyz
 //	order migrate    wait for Postgres, apply schema migrations, exit
 //
 // Configuration comes from environment variables only (see settings).
@@ -16,16 +16,22 @@ import (
 	"os"
 	"time"
 
+	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Yulian302/deliverit/gen/deliverit/order/v1/orderv1connect"
 	"github.com/Yulian302/deliverit/platform/config"
 	"github.com/Yulian302/deliverit/platform/health"
 	"github.com/Yulian302/deliverit/platform/httpx"
 	"github.com/Yulian302/deliverit/platform/logging"
 	"github.com/Yulian302/deliverit/platform/pg"
+	"github.com/Yulian302/deliverit/platform/rpcx"
 	"github.com/Yulian302/deliverit/platform/run"
 	"github.com/Yulian302/deliverit/platform/telemetry"
 	"github.com/Yulian302/deliverit/services/order/db/migrations"
+	"github.com/Yulian302/deliverit/services/order/internal/catalog"
 )
 
 // settings is Order's configuration: the shared fields plus its own.
@@ -105,15 +111,22 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	hc := health.New()
 	hc.Add("postgres", pg.ReadyCheck(pool))
 
-	// Application routes. The Connect-RPC handler (with its otelconnect
-	// interceptor, which creates the server spans) is mounted here in Task 8.
+	// Application routes: the Connect-RPC API.
 	app := http.NewServeMux()
+	path, rpc, err := catalogRoute(pool, log)
+	if err != nil {
+		return err
+	}
+	app.Handle(path, rpc)
 
-	// Order has no Deadline middleware: its callers set the deadline, and
-	// Connect carries it in the request (Connect-Timeout-Ms header).
+	// No httpx.AccessLog here: every app route is an RPC, and rpcx.AccessLog
+	// (inside catalogRoute) logs each call with its RPC code and trace_id.
+	// An HTTP-level line as well would double every call in the logs.
+	//
+	// No Deadline middleware either: callers set the deadline, and Connect
+	// carries it in the request (Connect-Timeout-Ms / grpc-timeout header).
 	handler := httpx.Chain(app,
 		httpx.RequestID,
-		httpx.AccessLog(log),
 		httpx.Recover(log),
 	)
 
@@ -125,6 +138,32 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
 	return run.ServeHTTP(ctx, log, srv, hc, cfg.ShutdownGrace)
+}
+
+// catalogRoute builds the OrderService RPC endpoint: handler → service →
+// Postgres store, with OpenTelemetry on every call. It returns the URL path
+// prefix to mount it on (/deliverit.order.v1.OrderService/).
+func catalogRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, error) {
+	// otelconnect creates a SERVER span per RPC plus RPC metrics.
+	//
+	// WithTrustRemote: by default otelconnect distrusts the caller's trace
+	// and starts a new one (linked, not nested), which suits a public API
+	// where anyone can send a traceparent header. Order is internal and only
+	// called by our own services, so it continues their trace instead: that
+	// is what makes Gateway → Order one trace in Grafana.
+	tracing, err := otelconnect.NewInterceptor(otelconnect.WithTrustRemote())
+	if err != nil {
+		return "", nil, fmt.Errorf("otelconnect: %w", err)
+	}
+
+	svc := catalog.NewService(catalog.NewPostgresStore(pool))
+	path, h := orderv1connect.NewOrderServiceHandler(
+		catalog.NewHandler(svc, log),
+		// First = outermost: tracing starts the span, then the access log
+		// runs inside it, so its line carries trace_id.
+		connect.WithInterceptors(tracing, rpcx.AccessLog(log)),
+	)
+	return path, h, nil
 }
 
 // withHealth serves the probes directly and everything else through app.

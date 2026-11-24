@@ -11,6 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	orderv1 "github.com/Yulian302/deliverit/gen/deliverit/order/v1"
+	"github.com/Yulian302/deliverit/gen/deliverit/order/v1/orderv1connect"
 )
 
 // The full startup path against a real Postgres: migrate mode creates the
@@ -49,6 +52,17 @@ func TestOrder_MigrateThenServeBecomesReady(t *testing.T) {
 
 	url, stop, done := startOrder(t, dsn)
 	waitStatus(t, url+"/readyz", http.StatusOK)
+
+	// The real RPC, end to end: client → h2c → handler → service → store →
+	// Postgres (migrated + seeded by migrate mode above).
+	client := orderv1connect.NewOrderServiceClient(h2cClient(), url)
+	resp, err := client.ListRestaurants(ctx, &orderv1.ListRestaurantsRequest{Lat: 50.4501, Lng: 30.5234})
+	if err != nil {
+		t.Fatalf("ListRestaurants: %v", err)
+	}
+	if n := len(resp.GetRestaurants()); n != 10 {
+		t.Errorf("got %d restaurants near Kyiv centre, want the 10 seeded", n)
+	}
 
 	stop()
 	if err := waitReturn(t, done); err != nil {
