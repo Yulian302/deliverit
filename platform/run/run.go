@@ -56,7 +56,9 @@ func Serve(ctx context.Context, log *slog.Logger, srv *http.Server, ln net.Liste
 	case <-ctx.Done():
 	}
 
-	log.InfoContext(ctx, "shutting down", slog.Duration("grace", grace))
+	// String, not slog.Duration: the JSON handler writes durations as
+	// nanoseconds (20000000000), which nobody can read at a glance.
+	log.InfoContext(ctx, "shutting down", slog.String("grace", grace.String()))
 	hc.SetDraining()
 
 	// ctx is already cancelled, so the grace timer needs a fresh deadline.
