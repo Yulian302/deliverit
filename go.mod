@@ -2,7 +2,10 @@ module github.com/Yulian302/deliverit
 
 go 1.26.0
 
+toolchain go1.26.7
+
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/caarlos0/env/v11 v11.4.2
 	github.com/exaring/otelpgx v0.13.0
 	github.com/google/uuid v1.6.0
@@ -17,6 +20,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -81,5 +85,4 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/grpc v1.85.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 )

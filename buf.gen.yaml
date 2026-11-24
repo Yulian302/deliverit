@@ -1,0 +1,16 @@
+# Code generation for everything under proto/ into gen/ (committed).
+# The plugins run from tools/go.mod, pinned to the same protobuf and connect
+# versions the services use, so generated code always matches the runtime.
+version: v2
+clean: true # gen/ is fully owned by buf: stale files are removed
+plugins:
+  - local: [go, tool, -modfile=tools/go.mod, protoc-gen-go]
+    out: gen
+    opt: paths=source_relative
+  - local: [go, tool, -modfile=tools/go.mod, protoc-gen-connect-go]
+    out: gen
+    opt:
+      - paths=source_relative
+      # Handlers and clients use plain messages: func(ctx, *Req) (*Resp, error).
+      # Headers stay reachable through connect.CallInfo when needed.
+      - simple

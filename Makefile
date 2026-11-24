@@ -14,7 +14,16 @@ DB_IMAGE     := postgres:17-alpine
 # Plain shell sourcing: no extra tools, and the binary never reads files.
 load-env = set -a && . ./$(1) && set +a
 
-.PHONY: test test-int lint run-gateway run-order migrate db-up db-down
+# Dev tools (buf, protoc plugins, goose) are pinned in their own module,
+# tools/go.mod, so their dependencies never change the services' versions.
+TOOL := go tool -modfile=tools/go.mod
+
+.PHONY: test test-int lint gen run-gateway run-order migrate migration db-up db-down
+
+## gen: lint the protobuf contracts and regenerate gen/ (commit the result)
+gen:
+	$(TOOL) buf lint
+	$(TOOL) buf generate
 
 ## test: unit tests with the race detector, in random order
 test:
@@ -39,6 +48,11 @@ run-order: $(ORDER_ENV)
 ## migrate: apply Order's migrations using services/order/.env
 migrate: $(ORDER_ENV)
 	$(call load-env,$(ORDER_ENV)) && go run ./services/order migrate
+
+## migration: new empty Order migration file, e.g. `make migration name=add_menu_items`
+migration:
+	@test -n "$(name)" || { echo 'usage: make migration name=<snake_case_name>'; exit 1; }
+	$(TOOL) goose -s -dir services/order/db/migrations create $(name) sql
 
 ## db-up: start a throwaway Postgres on localhost:5432 (removed on db-down)
 db-up:
