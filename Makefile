@@ -18,12 +18,20 @@ load-env = set -a && . ./$(1) && set +a
 # tools/go.mod, so their dependencies never change the services' versions.
 TOOL := go tool -modfile=tools/go.mod
 
+# sqlc runs from its official image (pinned): it isn't `go tool`-friendly.
+# -u keeps generated files owned by you, not root.
+SQLC_IMAGE := sqlc/sqlc:1.31.1
+SQLC = docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src/$(1) $(SQLC_IMAGE)
+
 .PHONY: test test-int lint gen run-gateway run-order migrate migration db-up db-down
 
-## gen: lint the protobuf contracts and regenerate gen/ (commit the result)
+## gen: regenerate all generated code (commit the result)
+##      protobuf contracts → gen/ (buf), SQL queries → */dbgen (sqlc, needs Docker)
 gen:
 	$(TOOL) buf lint
 	$(TOOL) buf generate
+	$(call SQLC,services/order) vet
+	$(call SQLC,services/order) generate
 
 ## test: unit tests with the race detector, in random order
 test:
