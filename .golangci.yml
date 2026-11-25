@@ -1,5 +1,10 @@
 version: "2"
 
+run:
+  # Also lint integration tests (files with //go:build integration).
+  build-tags:
+    - integration
+
 linters:
   enable:
     - govet
@@ -32,3 +37,21 @@ linters:
           deny:
             - pkg: github.com/Yulian302/deliverit/services/gateway
               desc: services must not import each other; use the RPC contract in gen/
+        # Inside a service: business rules and domain types know nothing about
+        # transport or storage (handler → service → store). Only rpc.go may
+        # import RPC/HTTP code, only store.go the database.
+        service-layer-is-pure:
+          files:
+            - "**/services/*/internal/*/service.go"
+            - "**/services/*/internal/*/model.go"
+          deny:
+            - pkg: net/http
+              desc: the service layer must not know about HTTP; that belongs in the rpc/handler layer
+            - pkg: connectrpc.com
+              desc: the service layer must not know about RPC; map errors in rpc.go
+            - pkg: github.com/Yulian302/deliverit/gen
+              desc: the service layer uses domain types (model.go), not protobuf messages
+            - pkg: github.com/jackc
+              desc: the service layer must not know about the database; go through the Store interface
+            - pkg: database/sql
+              desc: the service layer must not know about the database; go through the Store interface

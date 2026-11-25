@@ -1,0 +1,11 @@
+# buf: protobuf linting, breaking-change checks and code generation.
+# Run through `make gen` (buf is pinned in tools/go.mod, nothing to install).
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD # naming conventions, versioned packages (deliverit.order.v1), ...
+breaking:
+  use:
+    - FILE # removing/renumbering a field or RPC fails `buf breaking`

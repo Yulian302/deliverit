@@ -1,6 +1,11 @@
 # personal
 PLANNING.md
 
+# local config: may hold secrets. Only the documented examples are committed.
+.env
+.env.*
+!.env.example
+
 # build & test output
 bin/
 coverage.out

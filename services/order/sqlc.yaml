@@ -1,0 +1,17 @@
+# sqlc: generates type-safe Go from the SQL in db/queries, checked against the
+# schema built from db/migrations. Run through `make gen` (pinned Docker image).
+version: "2"
+sql:
+  - engine: postgresql
+    queries: db/queries
+    schema: db/migrations # sqlc understands goose files and skips the Down parts
+    gen:
+      go:
+        package: dbgen
+        out: internal/catalog/dbgen
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        overrides:
+          # google/uuid instead of pgtype.UUID: the type the rest of the code uses.
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID

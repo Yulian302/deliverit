@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+// Order service's internal RPC API. Called by the Gateway (and later by other
+// services) over Connect-RPC; never exposed to browsers directly.
+//
+// Compatibility rules (checked by `buf breaking`): never reuse or renumber a
+// field, never change a field's type; add new fields with new numbers.
+package deliverit.order.v1;
+
+option go_package = "github.com/Yulian302/deliverit/gen/deliverit/order/v1;orderv1";
+
+service OrderService {
+  // ListRestaurants returns restaurants near a point, nearest first.
+  // Errors: INVALID_ARGUMENT for out-of-range coordinates, radius or limit.
+  rpc ListRestaurants(ListRestaurantsRequest) returns (ListRestaurantsResponse);
+}
+
+message ListRestaurantsRequest {
+  // Latitude in degrees, -90..90.
+  double lat = 1;
+  // Longitude in degrees, -180..180.
+  double lng = 2;
+  // Search radius in km, 0 < radius_km <= 20. 0 (unset) means the default, 5.
+  double radius_km = 3;
+  // Maximum results, 0 < limit <= 50. 0 (unset) means the default, 20.
+  int32 limit = 4;
+}
+
+message Restaurant {
+  // UUID.
+  string id = 1;
+  string name = 2;
+  double lat = 3;
+  double lng = 4;
+  // Typical time to prepare an order, in minutes.
+  int32 prep_minutes = 5;
+  // Great-circle distance from the requested point, in km.
+  double distance_km = 6;
+}
+
+message ListRestaurantsResponse {
+  // Nearest first.
+  repeated Restaurant restaurants = 1;
+}

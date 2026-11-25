@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -30,10 +31,45 @@ func New(w io.Writer, service, level string) (*slog.Logger, error) {
 		return nil, fmt.Errorf("invalid log level %q (want debug|info|warn|error): %w", level, err)
 	}
 
-	base := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl}).
+	// Every record goes two ways:
+	//   - JSON on w (stdout): what `docker logs` and a terminal show;
+	//   - the OpenTelemetry bridge: exported over OTLP to Loki, carrying the
+	//     trace context of the span in ctx. Until telemetry.Setup installs a
+	//     real LoggerProvider, the global one discards, so creating the logger
+	//     first (as mains do) is fine.
+	jsonOut := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl}).
 		WithAttrs([]slog.Attr{slog.String("service", service)})
+	toOTel := &levelGate{min: lvl, next: otelslog.NewHandler(instrumentationName)}
+	base := slog.NewMultiHandler(jsonOut, toOTel)
 
 	return slog.New(&contextHandler{base: base, built: base}), nil
+}
+
+// instrumentationName identifies this logger in exported records.
+const instrumentationName = "github.com/Yulian302/deliverit/platform/logging"
+
+// levelGate drops records below min before they reach next. The otelslog
+// handler doesn't know LOG_LEVEL; without this, debug lines hidden on stdout
+// would still be shipped to (and stored in) Loki.
+type levelGate struct {
+	min  slog.Level
+	next slog.Handler
+}
+
+func (g *levelGate) Enabled(ctx context.Context, l slog.Level) bool {
+	return l >= g.min && g.next.Enabled(ctx, l)
+}
+
+func (g *levelGate) Handle(ctx context.Context, r slog.Record) error {
+	return g.next.Handle(ctx, r)
+}
+
+func (g *levelGate) WithAttrs(as []slog.Attr) slog.Handler {
+	return &levelGate{min: g.min, next: g.next.WithAttrs(as)}
+}
+
+func (g *levelGate) WithGroup(name string) slog.Handler {
+	return &levelGate{min: g.min, next: g.next.WithGroup(name)}
 }
 
 type requestIDKey struct{}
