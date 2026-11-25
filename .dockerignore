@@ -1,0 +1,23 @@
+# Keep the build context small and secret-free. The Dockerfile only COPYs
+# gen/, platform/ and services/, but everything not ignored here is still
+# sent to the Docker daemon on every build.
+
+# Local config may hold secrets: never let it near an image.
+**/.env
+**/.env.*
+!**/.env.example
+
+.git
+.github
+.superpowers
+.vscode
+.idea
+bin
+coverage.out
+docs
+deploy
+scripts
+tools
+proto
+api
+**/*_test.go

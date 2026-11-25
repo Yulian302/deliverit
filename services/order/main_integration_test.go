@@ -52,6 +52,9 @@ func TestOrder_MigrateThenServeBecomesReady(t *testing.T) {
 
 	url, stop, done := startOrder(t, dsn)
 	waitStatus(t, url+"/readyz", http.StatusOK)
+	if err := start(ctx, []string{"healthcheck"}, io.Discard); err != nil {
+		t.Fatalf("healthcheck on a ready Order = %v, want nil", err)
+	}
 
 	// The real RPC, end to end: client → h2c → handler → service → store →
 	// Postgres (migrated + seeded by migrate mode above).

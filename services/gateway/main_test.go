@@ -210,3 +210,21 @@ func TestGateway_OrderDownIs503(t *testing.T) {
 		t.Errorf("took %v, want a fast failure", took)
 	}
 }
+
+// `gateway healthcheck` is what Docker runs: 0 while serving, non-zero once
+// the server is gone.
+func TestGateway_HealthcheckMode(t *testing.T) {
+	_, stop, done := startGateway(t, "http://"+freeAddr(t)) // sets HTTP_ADDR for the probe too
+
+	if err := start(context.Background(), []string{"healthcheck"}, io.Discard); err != nil {
+		t.Fatalf("healthcheck while serving = %v, want nil", err)
+	}
+
+	stop()
+	if err := waitReturn(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if err := start(context.Background(), []string{"healthcheck"}, io.Discard); err == nil {
+		t.Fatal("healthcheck after shutdown = nil, want an error")
+	}
+}

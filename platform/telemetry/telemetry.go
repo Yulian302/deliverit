@@ -23,17 +23,21 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // metricInterval is how often metrics are pushed to the collector.
@@ -49,12 +53,15 @@ type Options struct {
 	Endpoint string
 	// SpanExporter replaces the OTLP span exporter. Used by tests.
 	SpanExporter sdktrace.SpanExporter
+	// LogExporter replaces the OTLP log exporter. Used by tests.
+	LogExporter sdklog.Exporter
 }
 
 // Shutdown flushes buffered telemetry and stops the exporters.
 type Shutdown func(context.Context) error
 
-// Setup registers the global TracerProvider, MeterProvider and propagator.
+// Setup registers the global TracerProvider, MeterProvider, LoggerProvider
+// and propagator.
 //
 // It does not contact the collector: gRPC connects lazily, so a service
 // starts fine while the collector is still coming up, and spans are retried
@@ -112,6 +119,34 @@ func Setup(ctx context.Context, o Options) (Shutdown, error) {
 		shutdowns = append(shutdowns, mp.Shutdown)
 	}
 
+	// Logs: the global LoggerProvider receives every slog record through the
+	// otelslog bridge (see platform/logging) and ships it over OTLP to Loki,
+	// with the trace context of the span it was written in.
+	lexp := o.LogExporter
+	if lexp == nil && o.Endpoint != "" {
+		lexp, err = otlploggrpc.New(ctx,
+			otlploggrpc.WithEndpoint(o.Endpoint),
+			otlploggrpc.WithInsecure(),
+		)
+		if err != nil {
+			for _, s := range shutdowns {
+				_ = s(ctx)
+			}
+			return nil, fmt.Errorf("telemetry: log exporter: %w", err)
+		}
+	}
+	if lexp != nil {
+		lp := sdklog.NewLoggerProvider(
+			sdklog.WithResource(res),
+			// Batch, like spans: a log call never waits on the network.
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(lexp)),
+		)
+		otel.SetLoggerProvider(lp)
+		// Flushed BEFORE the tracer provider (shutdowns run in order), so
+		// spans written while flushing logs still go out.
+		shutdowns = append([]func(context.Context) error{lp.Shutdown}, shutdowns...)
+	}
+
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, // traceparent / tracestate
@@ -146,8 +181,61 @@ func HTTPHandler(h http.Handler, operation string) http.Handler {
 // would let anyone attach their requests to arbitrary trace IDs, or choose
 // our sampling decision (its "sampled" flag). Trust inside, distrust at the
 // edge.
+//
+// It also returns the trace ID in the X-Trace-Id response header (see
+// HeaderTraceID).
 func PublicHTTPHandler(h http.Handler, operation string) http.Handler {
-	return otelhttp.NewHandler(h, operation,
+	return otelhttp.NewHandler(exposeTraceID(h), operation,
 		otelhttp.WithPublicEndpointFn(func(*http.Request) bool { return true }),
 	)
+}
+
+// HeaderTraceID carries the request's trace ID back to the client. Anyone
+// reporting a problem (or the smoke test) can quote it, and Tempo opens
+// exactly that trace. Safe to expose: it's a random ID, not data.
+const HeaderTraceID = "X-Trace-Id"
+
+// exposeTraceID sets HeaderTraceID before the handler writes its response
+// (headers can't change after the first write).
+func exposeTraceID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if sc := trace.SpanContextFromContext(r.Context()); sc.HasTraceID() {
+			w.Header().Set(HeaderTraceID, sc.TraceID().String())
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Route wraps a handler registered on a ServeMux so its request's span is
+// named after the matched route ("GET /v1/restaurants") with the standard
+// http.route attribute.
+//
+// Why it's needed: the span starts before routing (tracing must be the
+// outermost middleware), and the middlewares in between copy the request
+// (r.WithContext), so the route the mux finds never reaches the request the
+// tracing handler holds. Without this, spans are named just "GET".
+//
+// Anything in front of the tracing handler must not be a ServeMux (see
+// health.WithProbes): otelhttp renames the span from the pattern on its own
+// request after the handler returns, which would overwrite this name.
+//
+//	app.Handle("GET /v1/restaurants", telemetry.Route(handler))
+func Route(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Pattern != "" {
+			// r.Pattern is "GET /v1/restaurants"; http.route is the path part.
+			route := r.Pattern
+			if _, path, ok := strings.Cut(route, " "); ok {
+				route = path
+			}
+			span := trace.SpanFromContext(r.Context())
+			span.SetName(r.Method + " " + route)
+			span.SetAttributes(semconv.HTTPRoute(route))
+			// Same for the request metrics (duration histogram per route).
+			if l, ok := otelhttp.LabelerFromContext(r.Context()); ok {
+				l.Add(semconv.HTTPRoute(route))
+			}
+		}
+		h.ServeHTTP(w, r)
+	})
 }

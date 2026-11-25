@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Yulian302/deliverit/platform/health"
 	"github.com/Yulian302/deliverit/platform/telemetry"
 )
 
@@ -206,5 +207,65 @@ func TestPublicHTTPHandler_StartsNewTraceLinkedToCaller(t *testing.T) {
 	}
 	if len(s.Links) != 1 || s.Links[0].SpanContext.SpanID().String() != clientSpanID {
 		t.Errorf("links = %v, want one link to the client's span %s", s.Links, clientSpanID)
+	}
+}
+
+// The public handler returns its trace ID, so a client (the smoke test, a
+// user filing a bug) can quote it and we can open exactly that trace.
+func TestPublicHTTPHandler_ReturnsTraceID(t *testing.T) {
+	_, _ = setupInMemory(t)
+	var inHandler trace.SpanContext
+	h := telemetry.PublicHTTPHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		inHandler = trace.SpanContextFromContext(r.Context())
+	}), "test-op")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/restaurants", nil))
+
+	got := rec.Header().Get(telemetry.HeaderTraceID)
+	if got == "" || got != inHandler.TraceID().String() {
+		t.Errorf("%s = %q, want the request's trace ID %s", telemetry.HeaderTraceID, got, inHandler.TraceID())
+	}
+}
+
+type ctxKey struct{}
+
+// Muxes in front of the traced handler (the health/app split) mean the span
+// is created before the real route is known, so otelhttp would name every
+// request "GET /". Route renames the span once routing has happened.
+func TestRoute_NamesSpanAfterMatchedRoute(t *testing.T) {
+	exp, shutdown := setupInMemory(t)
+
+	app := http.NewServeMux()
+	app.Handle("GET /v1/restaurants", telemetry.Route(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	// Like the real chain: middleware between tracing and the router copies
+	// the request (r.WithContext), so the router's route never reaches the
+	// request otelhttp holds.
+	copying := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, 1)))
+	})
+	// The real outer layer: probes split off before tracing.
+	root := health.WithProbes(health.New(), telemetry.PublicHTTPHandler(copying, "gateway"))
+
+	root.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/restaurants?near=1,2", nil))
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	if spans[0].Name != "GET /v1/restaurants" {
+		t.Errorf("span name = %q, want %q", spans[0].Name, "GET /v1/restaurants")
+	}
+	var route string
+	for _, kv := range spans[0].Attributes {
+		if kv.Key == "http.route" {
+			route = kv.Value.AsString()
+		}
+	}
+	if route != "/v1/restaurants" {
+		t.Errorf("http.route = %q, want /v1/restaurants", route)
 	}
 }

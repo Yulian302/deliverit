@@ -2,6 +2,7 @@
 //
 //	order            serve: OrderService RPC API, /livez, /readyz
 //	order migrate    wait for Postgres, apply schema migrations, exit
+//	order healthcheck   exit 0 if this container's Order is ready (Docker HEALTHCHECK)
 //
 // Configuration comes from environment variables only (see settings).
 package main
@@ -77,8 +78,10 @@ func start(ctx context.Context, args []string, stdout io.Writer) error {
 		return serve(ctx, cfg, log)
 	case "migrate":
 		return migrate(ctx, cfg, log)
+	case "healthcheck":
+		return health.ProbeLocal(ctx, cfg.HTTPAddr)
 	default:
-		return fmt.Errorf("unknown mode %q (want: serve | migrate)", mode)
+		return fmt.Errorf("unknown mode %q (want: serve | migrate | healthcheck)", mode)
 	}
 }
 
@@ -130,7 +133,7 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 		httpx.Recover(log),
 	)
 
-	srv := httpx.NewServer(cfg.HTTPAddr, withHealth(hc, handler))
+	srv := httpx.NewServer(cfg.HTTPAddr, health.WithProbes(hc, handler))
 	// Connect-RPC clients use HTTP/2; inside the private network it runs
 	// without TLS ("h2c"). HTTP/1.1 stays on for curl and probes.
 	srv.Protocols = new(http.Protocols)
@@ -164,17 +167,6 @@ func catalogRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, e
 		connect.WithInterceptors(tracing, rpcx.AccessLog(log)),
 	)
 	return path, h, nil
-}
-
-// withHealth serves the probes directly and everything else through app.
-// Probes skip the middleware on purpose: an orchestrator hits them every few
-// seconds, and access-logging or tracing each hit would bury real traffic.
-func withHealth(hc *health.Checker, app http.Handler) http.Handler {
-	root := http.NewServeMux()
-	root.Handle("GET /livez", hc.LiveHandler())
-	root.Handle("GET /readyz", hc.ReadyHandler())
-	root.Handle("/", app)
-	return root
 }
 
 // migrate waits until Postgres accepts connections (up to cfg.MigrateWait),

@@ -1,0 +1,163 @@
+# The whole DeliverIt stack on one machine. Use the Makefile:
+#   make up      build images, start everything, wait until healthy
+#   make smoke   end-to-end check (incl. one trace in Tempo)
+#   make logs    follow logs (svc=order to pick one)
+#   make down    stop (data kept)        make clean   stop and delete data
+#
+# Host ports:
+#   8080 gateway (public API)   8081 order (Connect, for debugging)
+#   3000 Grafana                4317/4318 OTLP (run services locally against it)
+#   5433 Postgres               6379 Redis    9094 Kafka    8090 Kafka UI
+#
+# Every image is pinned to an exact version: `make up` gives the same stack
+# today and in a year.
+
+name: deliverit
+
+# Shared settings for the Go services (YAML anchor, merged with <<).
+x-go-service: &go-service
+  restart: unless-stopped
+  # Must exceed SHUTDOWN_GRACE: on `docker stop` the service gets SIGTERM and
+  # drains in-flight requests for up to 20s. Docker's default (10s) would
+  # SIGKILL it in the middle of that.
+  stop_grace_period: 25s
+  healthcheck:
+    # Distroless has no shell or curl: the binary probes its own /readyz.
+    test: ["CMD", "/app", "healthcheck"]
+    interval: 5s
+    timeout: 5s # longer than the probe's own 3s limit
+    retries: 3
+    start_period: 10s
+
+x-go-env: &go-env
+  LOG_LEVEL: info
+  OTEL_EXPORTER_OTLP_ENDPOINT: otel-lgtm:4317
+  SHUTDOWN_GRACE: 20s
+
+services:
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:17.12-alpine
+    environment:
+      # Superuser for administration only; services use their own roles
+      # (postgres-init.sql).
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    ports: ["5433:5432"] # 5433: leaves 5432 free for `make db-up`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8.12.0-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  kafka:
+    # Single node in KRaft mode (no ZooKeeper): one process is both broker
+    # and controller. Two listeners: kafka:9092 inside the compose network,
+    # localhost:9094 from the host.
+    image: apache/kafka:4.4.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # One broker, so internal topics can only have one replica.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly by the services (slice 2), never by a
+      # typo in a producer.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports: ["9094:9094"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.1
+    environment:
+      KAFKA_CLUSTERS_0_NAME: deliverit
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports: ["8090:8080"]
+    depends_on:
+      kafka: { condition: service_healthy }
+
+  otel-lgtm:
+    # One container: OpenTelemetry Collector (receives OTLP) + Tempo (traces)
+    # + Loki (logs) + Prometheus (metrics) + Grafana (UI on :3000).
+    image: grafana/otel-lgtm:0.41.1
+    ports:
+      - "3000:3000"
+      - "4317:4317"
+      - "4318:4318"
+
+  # ── DeliverIt services ────────────────────────────────────────────────────
+
+  order-migrate:
+    # One-shot: applies Order's migrations, then exits. `order` only starts
+    # after it exits successfully.
+    build: { context: ../.., args: { SERVICE: order } }
+    image: deliverit/order:dev
+    command: ["migrate"]
+    environment:
+      <<: *go-env
+      SERVICE_NAME: order-migrate
+      DATABASE_URL: postgres://order_svc:order_svc@postgres:5432/order_db?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+    # Without it, Docker restarts service endlessly even after it exists successfully.
+    restart: "no"
+
+  order:
+    <<: *go-service
+    # Same image as order-migrate; the second build is a cache hit.
+    build: { context: ../.., args: { SERVICE: order } }
+    image: deliverit/order:dev
+    environment:
+      <<: *go-env
+      SERVICE_NAME: order
+      HTTP_ADDR: :8081
+      DATABASE_URL: postgres://order_svc:order_svc@postgres:5432/order_db?sslmode=disable
+    ports: ["8081:8081"]
+    depends_on:
+      order-migrate: { condition: service_completed_successfully }
+      otel-lgtm: { condition: service_started }
+
+  gateway:
+    <<: *go-service
+    build: { context: ../.., args: { SERVICE: gateway } }
+    image: deliverit/gateway:dev
+    environment:
+      <<: *go-env
+      SERVICE_NAME: gateway
+      HTTP_ADDR: :8080
+      ORDER_URL: http://order:8081
+    ports: ["8080:8080"]
+    depends_on:
+      # Started, not healthy: the Gateway copes with Order being down (503
+      # problem+json), so it shouldn't wait for, or be taken down with, Order.
+      order: { condition: service_started }
+      otel-lgtm: { condition: service_started }
+
+volumes:
+  pgdata:

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,5 +133,17 @@ func TestOrder_MigrateGivesUpWhenDBNeverComesUp(t *testing.T) {
 	}
 	if took := time.Since(began); took > 5*time.Second {
 		t.Errorf("migrate took %v to give up, want about MIGRATE_WAIT (1s)", took)
+	}
+}
+
+// `order healthcheck` is what Docker runs to decide if the container is
+// healthy: it exits non-zero while /readyz is 503 (here: no database).
+func TestOrder_HealthcheckModeReflectsReadiness(t *testing.T) {
+	url, _, _ := startOrder(t, "postgres://u:p@127.0.0.1:1/db") // sets HTTP_ADDR for the probe too
+	waitStatus(t, url+"/readyz", http.StatusServiceUnavailable)
+
+	err := start(context.Background(), []string{"healthcheck"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "status 503") {
+		t.Fatalf("healthcheck while /readyz is 503 = %v, want the probe's status 503 error", err)
 	}
 }

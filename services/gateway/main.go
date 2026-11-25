@@ -2,6 +2,9 @@
 // apps talk to. It validates requests, calls the internal services over
 // Connect-RPC and turns their errors into problem+json responses.
 //
+//	gateway              serve the public API, /livez, /readyz
+//	gateway healthcheck  exit 0 if this container's Gateway is ready (Docker HEALTHCHECK)
+//
 // Configuration comes from environment variables only (see settings).
 package main
 
@@ -63,12 +66,20 @@ func main() {
 // start is main without the process-level parts (signals, exit codes), so
 // tests can run the whole service in-process and stop it by cancelling ctx.
 func start(ctx context.Context, args []string, stdout io.Writer) error {
-	if len(args) > 0 {
-		return fmt.Errorf("unexpected arguments %q (gateway takes none)", args)
+	mode := "serve"
+	switch {
+	case len(args) == 1 && args[0] == "healthcheck":
+		mode = "healthcheck"
+	case len(args) > 0:
+		return fmt.Errorf("unexpected arguments %q (want none, or: healthcheck)", args)
 	}
 	var cfg settings
 	if err := config.Load(&cfg); err != nil {
 		return err
+	}
+	if mode == "healthcheck" {
+		// What Docker's HEALTHCHECK runs (distroless has no curl).
+		return health.ProbeLocal(ctx, cfg.HTTPAddr)
 	}
 	log, err := logging.New(stdout, cfg.ServiceName, cfg.LogLevel)
 	if err != nil {
@@ -107,7 +118,7 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	// Application routes (the public contract is api/openapi.yaml).
 	// Method-specific patterns: other methods get 405 from the mux.
 	app := http.NewServeMux()
-	app.Handle("GET /v1/restaurants", api.NewRestaurantsHandler(order, log))
+	app.Handle("GET /v1/restaurants", telemetry.Route(api.NewRestaurantsHandler(order, log)))
 
 	// Order matters (first = outermost):
 	//   telemetry  starts the span and puts trace IDs in ctx, so everything
@@ -124,7 +135,7 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 		httpx.Deadline(requestDeadline),
 	), cfg.ServiceName)
 
-	srv := httpx.NewServer(cfg.HTTPAddr, withHealth(hc, handler))
+	srv := httpx.NewServer(cfg.HTTPAddr, health.WithProbes(hc, handler))
 	return run.ServeHTTP(ctx, log, srv, hc, cfg.ShutdownGrace)
 }
 
@@ -150,15 +161,4 @@ func newOrderClient(baseURL string) (orderv1connect.OrderServiceClient, error) {
 		DialContext: (&net.Dialer{Timeout: upstreamDialTimeout}).DialContext,
 	}}
 	return orderv1connect.NewOrderServiceClient(httpClient, baseURL, connect.WithInterceptors(tracing)), nil
-}
-
-// withHealth serves the probes directly and everything else through app.
-// Probes skip the middleware on purpose: an orchestrator hits them every few
-// seconds, and access-logging or tracing each hit would bury real traffic.
-func withHealth(hc *health.Checker, app http.Handler) http.Handler {
-	root := http.NewServeMux()
-	root.Handle("GET /livez", hc.LiveHandler())
-	root.Handle("GET /readyz", hc.ReadyHandler())
-	root.Handle("/", app)
-	return root
 }
