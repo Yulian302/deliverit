@@ -2,9 +2,12 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Yulian302/deliverit/services/order/internal/catalog/dbgen"
@@ -54,6 +57,32 @@ func (s *PostgresStore) ListNear(ctx context.Context, q NearbyQuery) ([]Restaura
 		})
 	}
 	return out, nil
+}
+
+// Menu implements Store. Two reads without a transaction: a menu changing
+// between them is harmless for a read-only view.
+func (s *PostgresStore) Menu(ctx context.Context, restaurantID uuid.UUID) (Restaurant, []MenuItem, error) {
+	r, err := s.q.GetRestaurant(ctx, restaurantID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Restaurant{}, nil, fmt.Errorf("restaurant %s: %w", restaurantID, ErrNotFound)
+	}
+	if err != nil {
+		return Restaurant{}, nil, fmt.Errorf("catalog store: get restaurant: %w", err)
+	}
+	rows, err := s.q.ListMenuItems(ctx, restaurantID)
+	if err != nil {
+		return Restaurant{}, nil, fmt.Errorf("catalog store: list menu: %w", err)
+	}
+	items := make([]MenuItem, 0, len(rows))
+	for _, m := range rows {
+		items = append(items, MenuItem{ID: m.ID, Name: m.Name, PriceMinor: m.PriceMinor, Available: m.Available})
+	}
+	return Restaurant{
+		ID:          r.ID,
+		Name:        r.Name,
+		Location:    Point{Lat: r.Lat, Lng: r.Lng},
+		PrepMinutes: int(r.PrepMinutes),
+	}, items, nil
 }
 
 // box is a latitude/longitude rectangle, in degrees.

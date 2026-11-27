@@ -30,6 +30,16 @@ type fakeOrder struct {
 	resp  *orderv1.ListRestaurantsResponse
 	errFn func(*orderv1.ListRestaurantsRequest) error
 	block bool
+
+	// The other RPCs (orders_test.go): canned responses, the error they
+	// all return, and the last request each got.
+	menu     *orderv1.GetMenuResponse
+	placed   *orderv1.PlaceOrderResponse
+	order    *orderv1.GetOrderResponse
+	err      error
+	gotMenu  *orderv1.GetMenuRequest
+	gotPlace *orderv1.PlaceOrderRequest
+	gotGet   *orderv1.GetOrderRequest
 }
 
 func (f *fakeOrder) ListRestaurants(ctx context.Context, req *orderv1.ListRestaurantsRequest) (*orderv1.ListRestaurantsResponse, error) {
@@ -250,9 +260,9 @@ func TestRestaurants_DeadlineReachesOrder(t *testing.T) {
 	var orderDeadline time.Time
 	var hasDeadline bool
 	mux := http.NewServeMux()
-	mux.Handle(orderv1connect.NewOrderServiceHandler(deadlineRecorder(func(ctx context.Context) {
+	mux.Handle(orderv1connect.NewOrderServiceHandler(deadlineRecorder{record: func(ctx context.Context) {
 		orderDeadline, hasDeadline = ctx.Deadline()
-	})))
+	}}))
 	order := httptest.NewServer(mux)
 	t.Cleanup(order.Close)
 
@@ -286,9 +296,14 @@ func closedAddr(t *testing.T) string {
 	return addr
 }
 
-type deadlineRecorder func(context.Context)
+// deadlineRecorder is an Order server that records each ListRestaurants
+// call's context; the other RPCs are unimplemented.
+type deadlineRecorder struct {
+	orderv1connect.UnimplementedOrderServiceHandler
+	record func(context.Context)
+}
 
 func (d deadlineRecorder) ListRestaurants(ctx context.Context, _ *orderv1.ListRestaurantsRequest) (*orderv1.ListRestaurantsResponse, error) {
-	d(ctx)
+	d.record(ctx)
 	return &orderv1.ListRestaurantsResponse{}, nil
 }

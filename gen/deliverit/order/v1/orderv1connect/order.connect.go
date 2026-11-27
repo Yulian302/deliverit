@@ -41,6 +41,12 @@ const (
 	// OrderServiceListRestaurantsProcedure is the fully-qualified name of the OrderService's
 	// ListRestaurants RPC.
 	OrderServiceListRestaurantsProcedure = "/deliverit.order.v1.OrderService/ListRestaurants"
+	// OrderServiceGetMenuProcedure is the fully-qualified name of the OrderService's GetMenu RPC.
+	OrderServiceGetMenuProcedure = "/deliverit.order.v1.OrderService/GetMenu"
+	// OrderServicePlaceOrderProcedure is the fully-qualified name of the OrderService's PlaceOrder RPC.
+	OrderServicePlaceOrderProcedure = "/deliverit.order.v1.OrderService/PlaceOrder"
+	// OrderServiceGetOrderProcedure is the fully-qualified name of the OrderService's GetOrder RPC.
+	OrderServiceGetOrderProcedure = "/deliverit.order.v1.OrderService/GetOrder"
 )
 
 // OrderServiceClient is a client for the deliverit.order.v1.OrderService service.
@@ -48,6 +54,20 @@ type OrderServiceClient interface {
 	// ListRestaurants returns restaurants near a point, nearest first.
 	// Errors: INVALID_ARGUMENT for out-of-range coordinates, radius or limit.
 	ListRestaurants(context.Context, *v1.ListRestaurantsRequest) (*v1.ListRestaurantsResponse, error)
+	// GetMenu returns a restaurant and everything it sells.
+	// Errors: INVALID_ARGUMENT for a malformed ID, NOT_FOUND for an unknown restaurant.
+	GetMenu(context.Context, *v1.GetMenuRequest) (*v1.GetMenuResponse, error)
+	// PlaceOrder creates an order in PENDING_PAYMENT. Callers: customers only.
+	// Idempotent per (customer, idempotency_key): a repeat with the same request
+	// returns the original order with replayed = true.
+	// Errors: INVALID_ARGUMENT (bad input, unknown or unavailable items,
+	// delivery too far), ALREADY_EXISTS (key reused with a different request),
+	// UNAUTHENTICATED (no caller), PERMISSION_DENIED (not a customer).
+	PlaceOrder(context.Context, *v1.PlaceOrderRequest) (*v1.PlaceOrderResponse, error)
+	// GetOrder returns an order the caller may see: its customer, staff of its
+	// restaurant, or ops. Errors: NOT_FOUND (missing, or not visible to the
+	// caller: the two are indistinguishable on purpose), UNAUTHENTICATED.
+	GetOrder(context.Context, *v1.GetOrderRequest) (*v1.GetOrderResponse, error)
 }
 
 // NewOrderServiceClient constructs a client for the deliverit.order.v1.OrderService service. By
@@ -67,12 +87,33 @@ func NewOrderServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(orderServiceMethods.ByName("ListRestaurants")),
 			connect.WithClientOptions(opts...),
 		),
+		getMenu: connect.NewClient[v1.GetMenuRequest, v1.GetMenuResponse](
+			httpClient,
+			baseURL+OrderServiceGetMenuProcedure,
+			connect.WithSchema(orderServiceMethods.ByName("GetMenu")),
+			connect.WithClientOptions(opts...),
+		),
+		placeOrder: connect.NewClient[v1.PlaceOrderRequest, v1.PlaceOrderResponse](
+			httpClient,
+			baseURL+OrderServicePlaceOrderProcedure,
+			connect.WithSchema(orderServiceMethods.ByName("PlaceOrder")),
+			connect.WithClientOptions(opts...),
+		),
+		getOrder: connect.NewClient[v1.GetOrderRequest, v1.GetOrderResponse](
+			httpClient,
+			baseURL+OrderServiceGetOrderProcedure,
+			connect.WithSchema(orderServiceMethods.ByName("GetOrder")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // orderServiceClient implements OrderServiceClient.
 type orderServiceClient struct {
 	listRestaurants *connect.Client[v1.ListRestaurantsRequest, v1.ListRestaurantsResponse]
+	getMenu         *connect.Client[v1.GetMenuRequest, v1.GetMenuResponse]
+	placeOrder      *connect.Client[v1.PlaceOrderRequest, v1.PlaceOrderResponse]
+	getOrder        *connect.Client[v1.GetOrderRequest, v1.GetOrderResponse]
 }
 
 // ListRestaurants calls deliverit.order.v1.OrderService.ListRestaurants.
@@ -84,11 +125,52 @@ func (c *orderServiceClient) ListRestaurants(ctx context.Context, req *v1.ListRe
 	return nil, err
 }
 
+// GetMenu calls deliverit.order.v1.OrderService.GetMenu.
+func (c *orderServiceClient) GetMenu(ctx context.Context, req *v1.GetMenuRequest) (*v1.GetMenuResponse, error) {
+	response, err := c.getMenu.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
+// PlaceOrder calls deliverit.order.v1.OrderService.PlaceOrder.
+func (c *orderServiceClient) PlaceOrder(ctx context.Context, req *v1.PlaceOrderRequest) (*v1.PlaceOrderResponse, error) {
+	response, err := c.placeOrder.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
+// GetOrder calls deliverit.order.v1.OrderService.GetOrder.
+func (c *orderServiceClient) GetOrder(ctx context.Context, req *v1.GetOrderRequest) (*v1.GetOrderResponse, error) {
+	response, err := c.getOrder.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
 // OrderServiceHandler is an implementation of the deliverit.order.v1.OrderService service.
 type OrderServiceHandler interface {
 	// ListRestaurants returns restaurants near a point, nearest first.
 	// Errors: INVALID_ARGUMENT for out-of-range coordinates, radius or limit.
 	ListRestaurants(context.Context, *v1.ListRestaurantsRequest) (*v1.ListRestaurantsResponse, error)
+	// GetMenu returns a restaurant and everything it sells.
+	// Errors: INVALID_ARGUMENT for a malformed ID, NOT_FOUND for an unknown restaurant.
+	GetMenu(context.Context, *v1.GetMenuRequest) (*v1.GetMenuResponse, error)
+	// PlaceOrder creates an order in PENDING_PAYMENT. Callers: customers only.
+	// Idempotent per (customer, idempotency_key): a repeat with the same request
+	// returns the original order with replayed = true.
+	// Errors: INVALID_ARGUMENT (bad input, unknown or unavailable items,
+	// delivery too far), ALREADY_EXISTS (key reused with a different request),
+	// UNAUTHENTICATED (no caller), PERMISSION_DENIED (not a customer).
+	PlaceOrder(context.Context, *v1.PlaceOrderRequest) (*v1.PlaceOrderResponse, error)
+	// GetOrder returns an order the caller may see: its customer, staff of its
+	// restaurant, or ops. Errors: NOT_FOUND (missing, or not visible to the
+	// caller: the two are indistinguishable on purpose), UNAUTHENTICATED.
+	GetOrder(context.Context, *v1.GetOrderRequest) (*v1.GetOrderResponse, error)
 }
 
 // NewOrderServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -104,10 +186,34 @@ func NewOrderServiceHandler(svc OrderServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(orderServiceMethods.ByName("ListRestaurants")),
 		connect.WithHandlerOptions(opts...),
 	)
+	orderServiceGetMenuHandler := connect.NewUnaryHandlerSimple(
+		OrderServiceGetMenuProcedure,
+		svc.GetMenu,
+		connect.WithSchema(orderServiceMethods.ByName("GetMenu")),
+		connect.WithHandlerOptions(opts...),
+	)
+	orderServicePlaceOrderHandler := connect.NewUnaryHandlerSimple(
+		OrderServicePlaceOrderProcedure,
+		svc.PlaceOrder,
+		connect.WithSchema(orderServiceMethods.ByName("PlaceOrder")),
+		connect.WithHandlerOptions(opts...),
+	)
+	orderServiceGetOrderHandler := connect.NewUnaryHandlerSimple(
+		OrderServiceGetOrderProcedure,
+		svc.GetOrder,
+		connect.WithSchema(orderServiceMethods.ByName("GetOrder")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/deliverit.order.v1.OrderService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case OrderServiceListRestaurantsProcedure:
 			orderServiceListRestaurantsHandler.ServeHTTP(w, r)
+		case OrderServiceGetMenuProcedure:
+			orderServiceGetMenuHandler.ServeHTTP(w, r)
+		case OrderServicePlaceOrderProcedure:
+			orderServicePlaceOrderHandler.ServeHTTP(w, r)
+		case OrderServiceGetOrderProcedure:
+			orderServiceGetOrderHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -119,4 +225,16 @@ type UnimplementedOrderServiceHandler struct{}
 
 func (UnimplementedOrderServiceHandler) ListRestaurants(context.Context, *v1.ListRestaurantsRequest) (*v1.ListRestaurantsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deliverit.order.v1.OrderService.ListRestaurants is not implemented"))
+}
+
+func (UnimplementedOrderServiceHandler) GetMenu(context.Context, *v1.GetMenuRequest) (*v1.GetMenuResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deliverit.order.v1.OrderService.GetMenu is not implemented"))
+}
+
+func (UnimplementedOrderServiceHandler) PlaceOrder(context.Context, *v1.PlaceOrderRequest) (*v1.PlaceOrderResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deliverit.order.v1.OrderService.PlaceOrder is not implemented"))
+}
+
+func (UnimplementedOrderServiceHandler) GetOrder(context.Context, *v1.GetOrderRequest) (*v1.GetOrderResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deliverit.order.v1.OrderService.GetOrder is not implemented"))
 }

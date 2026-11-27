@@ -3,6 +3,8 @@ package catalog
 import (
 	"context"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 // Search limits. Zero in a query means the default.
@@ -23,8 +25,12 @@ const (
 //   - an empty, non-nil slice when nothing matches.
 //
 // q is always already validated and has its defaults applied.
+//
+// Menu returns the restaurant (DistanceKm unset) and its items ordered by
+// ID, or an error wrapping ErrNotFound if the restaurant doesn't exist.
 type Store interface {
 	ListNear(ctx context.Context, q NearbyQuery) ([]Restaurant, error)
+	Menu(ctx context.Context, restaurantID uuid.UUID) (Restaurant, []MenuItem, error)
 }
 
 // Service holds the catalog's business rules. It knows nothing about HTTP,
@@ -51,6 +57,16 @@ func (s *Service) ListNearby(ctx context.Context, q NearbyQuery) ([]Restaurant, 
 		return nil, fmt.Errorf("list nearby: %w", err)
 	}
 	return rs, nil
+}
+
+// Menu returns a restaurant and everything it sells; ErrNotFound if there is
+// no such restaurant.
+func (s *Service) Menu(ctx context.Context, restaurantID uuid.UUID) (Restaurant, []MenuItem, error) {
+	r, items, err := s.store.Menu(ctx, restaurantID)
+	if err != nil {
+		return Restaurant{}, nil, fmt.Errorf("menu: %w", err)
+	}
+	return r, items, nil
 }
 
 // normalize checks q and applies defaults.

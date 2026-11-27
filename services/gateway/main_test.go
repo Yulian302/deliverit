@@ -25,6 +25,7 @@ import (
 const testSigningKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 const (
+	courier = "0193a1b1-0000-7000-8000-0000000000b1"
 	olena   = "0193a1b1-0000-7000-8000-0000000000c1"
 	opsDesk = "0193a1b1-0000-7000-8000-0000000000d1"
 )
@@ -192,7 +193,25 @@ func (c *callerLog) last() (calls int, id identity.Identity, ok bool) {
 	return c.calls, c.id, c.ok
 }
 
-type fakeOrder struct{ caller *callerLog }
+type fakeOrder struct {
+	orderv1connect.UnimplementedOrderServiceHandler
+	caller *callerLog
+}
+
+func (f fakeOrder) GetMenu(ctx context.Context, _ *orderv1.GetMenuRequest) (*orderv1.GetMenuResponse, error) {
+	f.caller.mu.Lock()
+	f.caller.calls++
+	f.caller.id, f.caller.ok = identity.FromContext(ctx)
+	f.caller.mu.Unlock()
+	return &orderv1.GetMenuResponse{Restaurant: &orderv1.Restaurant{Id: "r-1", Name: "Fake Pho"}, Currency: "UAH"}, nil
+}
+
+func (f fakeOrder) PlaceOrder(context.Context, *orderv1.PlaceOrderRequest) (*orderv1.PlaceOrderResponse, error) {
+	f.caller.mu.Lock()
+	f.caller.calls++
+	f.caller.mu.Unlock()
+	return &orderv1.PlaceOrderResponse{Order: &orderv1.Order{Id: "o-1"}}, nil
+}
 
 func (f fakeOrder) ListRestaurants(ctx context.Context, _ *orderv1.ListRestaurantsRequest) (*orderv1.ListRestaurantsResponse, error) {
 	f.caller.mu.Lock()
@@ -361,5 +380,55 @@ func TestGateway_KeygenMode(t *testing.T) {
 	}
 	if _, err := auth.ParseSigningKey(line); err != nil {
 		t.Fatalf("keygen output doesn't parse: %v", err)
+	}
+}
+
+func postOrder(t *testing.T, url, token string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url+"/v1/orders", strings.NewReader(`{"restaurantId":"r","items":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Idempotency-Key", "k1")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// Only customers may place orders; the Gateway turns others away before Order.
+func TestGateway_PlaceOrderNeedsCustomer(t *testing.T) {
+	orderURL, _, caller := fakeOrderServer(t)
+	url, _, _ := startGateway(t, orderURL)
+
+	if resp := postOrder(t, url, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("anonymous: status %d; want 401", resp.StatusCode)
+	}
+	if resp := postOrder(t, url, login(t, url, courier)); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("courier: status %d; want 403", resp.StatusCode)
+	}
+	if calls, _, _ := caller.last(); calls != 0 {
+		t.Fatalf("Order called %d times; want 0", calls)
+	}
+	if resp := postOrder(t, url, login(t, url, olena)); resp.StatusCode != http.StatusAccepted {
+		t.Errorf("customer: status %d; want 202", resp.StatusCode)
+	}
+}
+
+// The menu is public: no token needed.
+func TestGateway_MenuIsPublic(t *testing.T) {
+	orderURL, _, caller := fakeOrderServer(t)
+	url, _, _ := startGateway(t, orderURL)
+	resp := get(t, url+"/v1/restaurants/0193a1b0-0000-7000-8000-000000000001/menu", http.Header{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d; want 200", resp.StatusCode)
+	}
+	if calls, _, ok := caller.last(); calls != 1 || ok {
+		t.Fatalf("Order saw calls=%d identity=%v; want 1 anonymous call", calls, ok)
 	}
 }

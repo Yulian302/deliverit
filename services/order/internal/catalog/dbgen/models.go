@@ -5,9 +5,50 @@
 package dbgen
 
 import (
+	"time"
+
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type IdempotencyKey struct {
+	Scope       string
+	Key         string
+	RequestHash []byte
+	Response    []byte
+	CreatedAt   time.Time
+}
+
+type MenuItem struct {
+	ID           uuid.UUID
+	RestaurantID uuid.UUID
+	Name         string
+	PriceMinor   int64
+	Available    bool
+}
+
+type Order struct {
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	RestaurantID    uuid.UUID
+	Status          string
+	TotalMinor      int64
+	Currency        string
+	DeliveryLat     float64
+	DeliveryLng     float64
+	DeliveryAddress string
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type OrderItem struct {
+	OrderID        uuid.UUID
+	LineNo         int32
+	MenuItemID     uuid.UUID
+	Name           string
+	UnitPriceMinor int64
+	Quantity       int32
+}
 
 type Restaurant struct {
 	ID          uuid.UUID
@@ -15,5 +56,5 @@ type Restaurant struct {
 	Lat         float64
 	Lng         float64
 	PrepMinutes int32
-	CreatedAt   pgtype.Timestamptz
+	CreatedAt   time.Time
 }

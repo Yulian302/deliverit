@@ -4,12 +4,15 @@ package catalog_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"math"
 	"os"
 	"sort"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -133,5 +136,37 @@ func TestListNear_NothingNearbyIsEmptyNotNil(t *testing.T) {
 	rs := listNear(t, catalog.NearbyQuery{Center: catalog.Point{Lat: 0, Lng: 0}, RadiusKm: 5, Limit: 20})
 	if rs == nil || len(rs) != 0 {
 		t.Errorf("got %#v, want an empty, non-nil slice", rs)
+	}
+}
+
+func TestStoreMenu_Seeded(t *testing.T) {
+	id := uuid.MustParse("0193a1b0-0000-7000-8000-000000000001")
+	r, items, err := catalog.NewPostgresStore(pool).Menu(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ID != id || r.Name != "Khreshchatyk Kitchen" {
+		t.Errorf("restaurant = %+v", r)
+	}
+	if len(items) != 3 {
+		t.Fatalf("%d items; want 3", len(items))
+	}
+	for i, it := range items {
+		if want := uuid.MustParse(fmt.Sprintf("0193a1b2-0000-7000-8000-0000000001%02d", i+1)); it.ID != want {
+			t.Errorf("item %d id = %s; want %s (ordered by id)", i, it.ID, want)
+		}
+		if it.PriceMinor <= 0 || it.Name == "" {
+			t.Errorf("item %d = %+v", i, it)
+		}
+	}
+	if items[2].Available || !items[0].Available {
+		t.Errorf("availability = %v,%v,%v; want true,true,false", items[0].Available, items[1].Available, items[2].Available)
+	}
+}
+
+func TestStoreMenu_UnknownRestaurant(t *testing.T) {
+	_, _, err := catalog.NewPostgresStore(pool).Menu(context.Background(), uuid.New())
+	if !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("err = %v; want ErrNotFound", err)
 	}
 }

@@ -2,11 +2,12 @@
 # schema built from db/migrations. Run through `make gen` (pinned Docker image).
 version: "2"
 sql:
+  # One package per Order module, each with its own queries file.
   - engine: postgresql
-    queries: db/queries
+    queries: db/queries/catalog.sql
     schema: db/migrations # sqlc understands goose files and skips the Down parts
     gen:
-      go:
+      go: &go
         package: dbgen
         out: internal/catalog/dbgen
         sql_package: pgx/v5
@@ -15,3 +16,13 @@ sql:
           # google/uuid instead of pgtype.UUID: the type the rest of the code uses.
           - db_type: uuid
             go_type: github.com/google/uuid.UUID
+          # timestamptz as time.Time (UTC instants), not pgtype.Timestamptz.
+          - db_type: timestamptz
+            go_type: time.Time
+  - engine: postgresql
+    queries: db/queries/ordering.sql
+    schema: db/migrations
+    gen:
+      go:
+        <<: *go
+        out: internal/ordering/dbgen

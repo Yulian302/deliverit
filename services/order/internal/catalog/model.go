@@ -1,5 +1,5 @@
 // Package catalog is Order's restaurant catalog: finding restaurants near a
-// point.
+// point, and reading a restaurant's menu.
 //
 // Layers, one file each (enforced by depguard in .golangci.yml):
 //
@@ -37,6 +37,23 @@ type NearbyQuery struct {
 	RadiusKm float64
 	Limit    int
 }
+
+// Currency is the one currency the service works in (ISO 4217). Prices are
+// integer minor units of it (kopecks).
+const Currency = "UAH"
+
+// MenuItem is something a restaurant sells.
+type MenuItem struct {
+	ID         uuid.UUID
+	Name       string
+	PriceMinor int64
+	// Available is false for items listed but not orderable right now.
+	Available bool
+}
+
+// ErrNotFound marks a lookup of something that doesn't exist. The RPC layer
+// turns it into NOT_FOUND.
+var ErrNotFound = errors.New("not found")
 
 // ErrInvalidArgument marks errors caused by bad input. Check with errors.Is;
 // the RPC layer turns it into INVALID_ARGUMENT.

@@ -144,6 +144,9 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	app.Handle("GET /v1/restaurants", telemetry.Route(api.NewRestaurantsHandler(order, log)))
 	app.Handle("POST /v1/auth/demo-login", telemetry.Route(api.NewDemoLoginHandler(issuer)))
 	app.Handle("GET /v1/auth/me", telemetry.Route(api.RequireRole()(api.NewMeHandler())))
+	app.Handle("GET /v1/restaurants/{id}/menu", telemetry.Route(api.NewMenuHandler(order, log)))
+	app.Handle("POST /v1/orders", telemetry.Route(api.RequireRole(identity.RoleCustomer)(api.NewPlaceOrderHandler(order, log))))
+	app.Handle("GET /v1/orders/{id}", telemetry.Route(api.RequireRole()(api.NewGetOrderHandler(order, log))))
 
 	// Order matters (first = outermost):
 	//   telemetry  starts the span and puts trace IDs in ctx, so everything

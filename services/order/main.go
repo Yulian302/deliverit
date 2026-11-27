@@ -34,6 +34,7 @@ import (
 	"github.com/Yulian302/deliverit/platform/telemetry"
 	"github.com/Yulian302/deliverit/services/order/db/migrations"
 	"github.com/Yulian302/deliverit/services/order/internal/catalog"
+	"github.com/Yulian302/deliverit/services/order/internal/ordering"
 )
 
 // settings is Order's configuration: the shared fields plus its own.
@@ -117,14 +118,14 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 
 	// Application routes: the Connect-RPC API.
 	app := http.NewServeMux()
-	path, rpc, err := catalogRoute(pool, log)
+	path, rpc, err := rpcRoute(pool, log)
 	if err != nil {
 		return err
 	}
 	app.Handle(path, rpc)
 
 	// No httpx.AccessLog here: every app route is an RPC, and rpcx.AccessLog
-	// (inside catalogRoute) logs each call with its RPC code and trace_id.
+	// (inside rpcRoute) logs each call with its RPC code and trace_id.
 	// An HTTP-level line as well would double every call in the logs.
 	//
 	// No Deadline middleware either: callers set the deadline, and Connect
@@ -144,10 +145,29 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	return run.ServeHTTP(ctx, log, srv, hc, cfg.ShutdownGrace)
 }
 
-// catalogRoute builds the OrderService RPC endpoint: handler → service →
-// Postgres store, with OpenTelemetry on every call. It returns the URL path
+// orderServer is the whole OrderService: each package's Handler embeds
+// UnimplementedOrderServiceHandler, and Go resolves each method to the
+// shallowest one, so ListRestaurants/GetMenu come from catalog and
+// PlaceOrder/GetOrder from ordering. TestOrder_ServesEveryRPC guards this.
+//
+// The aliases only give the two embedded fields different names (both types
+// are called Handler); embedding through an alias keeps the method depths.
+type orderServer struct {
+	*catalogRPC
+	*orderingRPC
+}
+
+type (
+	catalogRPC  = catalog.Handler
+	orderingRPC = ordering.Handler
+)
+
+var _ orderv1connect.OrderServiceHandler = orderServer{}
+
+// rpcRoute builds the OrderService RPC endpoint: handlers → services →
+// Postgres stores, with OpenTelemetry on every call. It returns the URL path
 // prefix to mount it on (/deliverit.order.v1.OrderService/).
-func catalogRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, error) {
+func rpcRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, error) {
 	// otelconnect creates a SERVER span per RPC plus RPC metrics.
 	//
 	// WithTrustRemote: by default otelconnect distrusts the caller's trace
@@ -160,9 +180,12 @@ func catalogRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, e
 		return "", nil, fmt.Errorf("otelconnect: %w", err)
 	}
 
-	svc := catalog.NewService(catalog.NewPostgresStore(pool))
+	server := orderServer{
+		catalogRPC:  catalog.NewHandler(catalog.NewService(catalog.NewPostgresStore(pool)), log),
+		orderingRPC: ordering.NewHandler(ordering.NewService(ordering.NewPostgresStore(pool), time.Now), log),
+	}
 	path, h := orderv1connect.NewOrderServiceHandler(
-		catalog.NewHandler(svc, log),
+		server,
 		// First = outermost: tracing starts the span; identity reads the
 		// caller from the Gateway's Deliverit-* headers into ctx; the access
 		// log runs inside the span, so its line carries trace_id.
