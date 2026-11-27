@@ -1,4 +1,5 @@
 # DeliverIt — developer entry points.
+# Keep in sync with the golangci-lint-action `version:` in .github/workflows/ci.yml.
 GOLANGCI_LINT_VERSION := v2.15.0
 
 # Per-service local config (git-ignored copies of the committed .env.example).
@@ -26,7 +27,7 @@ SQLC = docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /sr
 # The full stack in Docker (deploy/compose/docker-compose.yml).
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: test test-int lint gen run-gateway run-order migrate migration db-up db-down \
+.PHONY: test test-int lint gen gen-check run-gateway run-order migrate migration db-up db-down \
 	up down clean logs ps smoke
 
 ## up: build images and start the whole stack; returns once everything is healthy
@@ -60,6 +61,15 @@ gen:
 	$(TOOL) buf generate
 	$(call SQLC,services/order) vet
 	$(call SQLC,services/order) generate
+
+## gen-check: fail if regenerating changes or adds any file (run on a clean tree; CI runs it)
+gen-check: gen
+	@changes=$$(git status --porcelain); \
+	if [ -n "$$changes" ]; then \
+		echo "generated code is out of date; run 'make gen' and commit the result:"; \
+		echo "$$changes"; \
+		exit 1; \
+	fi
 
 ## test: unit tests with the race detector, in random order
 test:

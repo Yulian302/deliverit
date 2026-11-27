@@ -1,0 +1,159 @@
+# CI for DeliverIt: every job runs the same Makefile target you run locally,
+# so "green on my laptop" and "green in CI" mean the same thing.
+name: ci
+
+# When CI runs — exactly once per push:
+#   push to main              → run (checks what actually landed)
+#   push to a branch, no PR   → run (feedback before you open a PR)
+#   push to a branch with PR  → skipped by `gate`; the pull_request run covers it
+#   pull_request into main    → run, on the merge result (what would land on main)
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Least privilege: jobs only read the repository.
+permissions:
+  contents: read
+
+# A new push to the same branch/PR cancels the now-stale run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decides whether this run does any work (see the table at the top).
+  # Every other job needs it, so a skipped run is a few seconds, not 6 jobs.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read # to look up open PRs for the pushed branch
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          run=true
+          if [[ $EVENT == push && $BRANCH != main ]]; then
+            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main \
+              --state open --json number --jq '.[0].number // empty')
+            if [[ -n $pr ]]; then
+              echo "::notice::$BRANCH has open PR #$pr; its pull_request run covers this push"
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  lint:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Full history: `buf breaking` compares against an earlier commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0 # keep in sync with GOLANGCI_LINT_VERSION in the Makefile
+      - name: buf lint
+        run: go tool -modfile=tools/go.mod buf lint
+      - name: buf breaking (against the PR base)
+        if: github.event_name == 'pull_request'
+        run: go tool -modfile=tools/go.mod buf breaking --against ".git#ref=${{ github.event.pull_request.base.sha }}"
+      # A branch without a PR: compare against where it forked from main.
+      - name: buf breaking (against the fork point from main)
+        if: github.event_name == 'push' && github.ref_name != 'main'
+        run: go tool -modfile=tools/go.mod buf breaking --against ".git#ref=$(git merge-base HEAD origin/main)"
+
+  test:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - run: make test
+
+  test-integration:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      # testcontainers starts real Postgres on the runner's Docker.
+      - run: make test-int
+
+  generated:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      # Fails if gen/ or */dbgen/ differ from what the contracts generate.
+      - run: make gen-check
+
+  vuln:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+  e2e:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Start the stack
+        run: make up
+      - name: Smoke test
+        run: make smoke
+      - name: Dump stack state on failure
+        if: failure()
+        run: |
+          make ps
+          docker compose -f deploy/compose/docker-compose.yml logs --no-color --tail=200
