@@ -26,3 +26,13 @@ FROM (
 WHERE distance_km <= @radius_km::float8
 ORDER BY distance_km, id
 LIMIT @lim::int;
+
+-- name: GetRestaurant :one
+SELECT id, name, lat, lng, prep_minutes FROM restaurants WHERE id = @id;
+
+-- name: ListMenuItems :many
+-- A restaurant's menu, in a stable order.
+SELECT id, name, price_minor, available
+FROM menu_items
+WHERE restaurant_id = @restaurant_id
+ORDER BY id;

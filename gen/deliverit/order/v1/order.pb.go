@@ -15,6 +15,7 @@ package orderv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -26,6 +27,74 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// OrderStatus follows the order state machine in docs/SPEC.md §5.
+type OrderStatus int32
+
+const (
+	OrderStatus_ORDER_STATUS_UNSPECIFIED         OrderStatus = 0
+	OrderStatus_ORDER_STATUS_PENDING_PAYMENT     OrderStatus = 1
+	OrderStatus_ORDER_STATUS_AWAITING_RESTAURANT OrderStatus = 2
+	OrderStatus_ORDER_STATUS_PREPARING           OrderStatus = 3
+	OrderStatus_ORDER_STATUS_READY               OrderStatus = 4
+	OrderStatus_ORDER_STATUS_PICKED_UP           OrderStatus = 5
+	OrderStatus_ORDER_STATUS_DELIVERED           OrderStatus = 6
+	OrderStatus_ORDER_STATUS_CANCELLED           OrderStatus = 7
+	OrderStatus_ORDER_STATUS_FAILED              OrderStatus = 8
+)
+
+// Enum value maps for OrderStatus.
+var (
+	OrderStatus_name = map[int32]string{
+		0: "ORDER_STATUS_UNSPECIFIED",
+		1: "ORDER_STATUS_PENDING_PAYMENT",
+		2: "ORDER_STATUS_AWAITING_RESTAURANT",
+		3: "ORDER_STATUS_PREPARING",
+		4: "ORDER_STATUS_READY",
+		5: "ORDER_STATUS_PICKED_UP",
+		6: "ORDER_STATUS_DELIVERED",
+		7: "ORDER_STATUS_CANCELLED",
+		8: "ORDER_STATUS_FAILED",
+	}
+	OrderStatus_value = map[string]int32{
+		"ORDER_STATUS_UNSPECIFIED":         0,
+		"ORDER_STATUS_PENDING_PAYMENT":     1,
+		"ORDER_STATUS_AWAITING_RESTAURANT": 2,
+		"ORDER_STATUS_PREPARING":           3,
+		"ORDER_STATUS_READY":               4,
+		"ORDER_STATUS_PICKED_UP":           5,
+		"ORDER_STATUS_DELIVERED":           6,
+		"ORDER_STATUS_CANCELLED":           7,
+		"ORDER_STATUS_FAILED":              8,
+	}
+)
+
+func (x OrderStatus) Enum() *OrderStatus {
+	p := new(OrderStatus)
+	*p = x
+	return p
+}
+
+func (x OrderStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OrderStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_deliverit_order_v1_order_proto_enumTypes[0].Descriptor()
+}
+
+func (OrderStatus) Type() protoreflect.EnumType {
+	return &file_deliverit_order_v1_order_proto_enumTypes[0]
+}
+
+func (x OrderStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OrderStatus.Descriptor instead.
+func (OrderStatus) EnumDescriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{0}
+}
 
 type ListRestaurantsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -231,11 +300,710 @@ func (x *ListRestaurantsResponse) GetRestaurants() []*Restaurant {
 	return nil
 }
 
+type GetMenuRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UUID.
+	RestaurantId  string `protobuf:"bytes,1,opt,name=restaurant_id,json=restaurantId,proto3" json:"restaurant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMenuRequest) Reset() {
+	*x = GetMenuRequest{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMenuRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMenuRequest) ProtoMessage() {}
+
+func (x *GetMenuRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMenuRequest.ProtoReflect.Descriptor instead.
+func (*GetMenuRequest) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetMenuRequest) GetRestaurantId() string {
+	if x != nil {
+		return x.RestaurantId
+	}
+	return ""
+}
+
+type MenuItem struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UUID.
+	Id   string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Price in minor units (kopecks) of the menu's currency.
+	PriceMinor int64 `protobuf:"varint,3,opt,name=price_minor,json=priceMinor,proto3" json:"price_minor,omitempty"`
+	// False: listed but can't be ordered right now.
+	Available     bool `protobuf:"varint,4,opt,name=available,proto3" json:"available,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MenuItem) Reset() {
+	*x = MenuItem{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MenuItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MenuItem) ProtoMessage() {}
+
+func (x *MenuItem) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MenuItem.ProtoReflect.Descriptor instead.
+func (*MenuItem) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MenuItem) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *MenuItem) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *MenuItem) GetPriceMinor() int64 {
+	if x != nil {
+		return x.PriceMinor
+	}
+	return 0
+}
+
+func (x *MenuItem) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+type GetMenuResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// distance_km is not set.
+	Restaurant *Restaurant `protobuf:"bytes,1,opt,name=restaurant,proto3" json:"restaurant,omitempty"`
+	Items      []*MenuItem `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
+	// ISO 4217 code, e.g. "UAH".
+	Currency      string `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMenuResponse) Reset() {
+	*x = GetMenuResponse{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMenuResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMenuResponse) ProtoMessage() {}
+
+func (x *GetMenuResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMenuResponse.ProtoReflect.Descriptor instead.
+func (*GetMenuResponse) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetMenuResponse) GetRestaurant() *Restaurant {
+	if x != nil {
+		return x.Restaurant
+	}
+	return nil
+}
+
+func (x *GetMenuResponse) GetItems() []*MenuItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *GetMenuResponse) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+type PlaceOrderRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Client-chosen, 1-64 chars of [A-Za-z0-9_-], unique per customer.
+	IdempotencyKey string `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	// UUID.
+	RestaurantId string `protobuf:"bytes,2,opt,name=restaurant_id,json=restaurantId,proto3" json:"restaurant_id,omitempty"`
+	// 1-20 lines, each menu item at most once.
+	Lines         []*OrderLine      `protobuf:"bytes,3,rep,name=lines,proto3" json:"lines,omitempty"`
+	Delivery      *DeliveryLocation `protobuf:"bytes,4,opt,name=delivery,proto3" json:"delivery,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceOrderRequest) Reset() {
+	*x = PlaceOrderRequest{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceOrderRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceOrderRequest) ProtoMessage() {}
+
+func (x *PlaceOrderRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceOrderRequest.ProtoReflect.Descriptor instead.
+func (*PlaceOrderRequest) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PlaceOrderRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *PlaceOrderRequest) GetRestaurantId() string {
+	if x != nil {
+		return x.RestaurantId
+	}
+	return ""
+}
+
+func (x *PlaceOrderRequest) GetLines() []*OrderLine {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
+func (x *PlaceOrderRequest) GetDelivery() *DeliveryLocation {
+	if x != nil {
+		return x.Delivery
+	}
+	return nil
+}
+
+type OrderLine struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UUID of an available item of the order's restaurant.
+	MenuItemId string `protobuf:"bytes,1,opt,name=menu_item_id,json=menuItemId,proto3" json:"menu_item_id,omitempty"`
+	// 1-20.
+	Quantity      int32 `protobuf:"varint,2,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OrderLine) Reset() {
+	*x = OrderLine{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderLine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderLine) ProtoMessage() {}
+
+func (x *OrderLine) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderLine.ProtoReflect.Descriptor instead.
+func (*OrderLine) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *OrderLine) GetMenuItemId() string {
+	if x != nil {
+		return x.MenuItemId
+	}
+	return ""
+}
+
+func (x *OrderLine) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+type DeliveryLocation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Latitude in degrees, within 10 km of the restaurant.
+	Lat float64 `protobuf:"fixed64,1,opt,name=lat,proto3" json:"lat,omitempty"`
+	// Longitude in degrees.
+	Lng float64 `protobuf:"fixed64,2,opt,name=lng,proto3" json:"lng,omitempty"`
+	// Free text for the courier (street, flat, door code).
+	Address       string `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeliveryLocation) Reset() {
+	*x = DeliveryLocation{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeliveryLocation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeliveryLocation) ProtoMessage() {}
+
+func (x *DeliveryLocation) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeliveryLocation.ProtoReflect.Descriptor instead.
+func (*DeliveryLocation) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DeliveryLocation) GetLat() float64 {
+	if x != nil {
+		return x.Lat
+	}
+	return 0
+}
+
+func (x *DeliveryLocation) GetLng() float64 {
+	if x != nil {
+		return x.Lng
+	}
+	return 0
+}
+
+func (x *DeliveryLocation) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type PlaceOrderResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Order *Order                 `protobuf:"bytes,1,opt,name=order,proto3" json:"order,omitempty"`
+	// True when this is a repeat of an earlier request with the same key: the
+	// order is the original response, not necessarily its current state.
+	Replayed      bool `protobuf:"varint,2,opt,name=replayed,proto3" json:"replayed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceOrderResponse) Reset() {
+	*x = PlaceOrderResponse{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceOrderResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceOrderResponse) ProtoMessage() {}
+
+func (x *PlaceOrderResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceOrderResponse.ProtoReflect.Descriptor instead.
+func (*PlaceOrderResponse) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PlaceOrderResponse) GetOrder() *Order {
+	if x != nil {
+		return x.Order
+	}
+	return nil
+}
+
+func (x *PlaceOrderResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
+type GetOrderRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UUID.
+	OrderId       string `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOrderRequest) Reset() {
+	*x = GetOrderRequest{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOrderRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOrderRequest) ProtoMessage() {}
+
+func (x *GetOrderRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOrderRequest.ProtoReflect.Descriptor instead.
+func (*GetOrderRequest) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetOrderRequest) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+type GetOrderResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Order         *Order                 `protobuf:"bytes,1,opt,name=order,proto3" json:"order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOrderResponse) Reset() {
+	*x = GetOrderResponse{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOrderResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOrderResponse) ProtoMessage() {}
+
+func (x *GetOrderResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOrderResponse.ProtoReflect.Descriptor instead.
+func (*GetOrderResponse) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetOrderResponse) GetOrder() *Order {
+	if x != nil {
+		return x.Order
+	}
+	return nil
+}
+
+type Order struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UUID (v7).
+	Id           string       `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	CustomerId   string       `protobuf:"bytes,2,opt,name=customer_id,json=customerId,proto3" json:"customer_id,omitempty"`
+	RestaurantId string       `protobuf:"bytes,3,opt,name=restaurant_id,json=restaurantId,proto3" json:"restaurant_id,omitempty"`
+	Status       OrderStatus  `protobuf:"varint,4,opt,name=status,proto3,enum=deliverit.order.v1.OrderStatus" json:"status,omitempty"`
+	Items        []*OrderItem `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
+	// Sum of unit_price_minor * quantity, in minor units of currency.
+	TotalMinor int64 `protobuf:"varint,6,opt,name=total_minor,json=totalMinor,proto3" json:"total_minor,omitempty"`
+	// ISO 4217 code, e.g. "UAH".
+	Currency  string                 `protobuf:"bytes,7,opt,name=currency,proto3" json:"currency,omitempty"`
+	Delivery  *DeliveryLocation      `protobuf:"bytes,8,opt,name=delivery,proto3" json:"delivery,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Starts at 1, bumped on every change.
+	Version       int32 `protobuf:"varint,10,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Order) Reset() {
+	*x = Order{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Order) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Order) ProtoMessage() {}
+
+func (x *Order) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Order.ProtoReflect.Descriptor instead.
+func (*Order) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *Order) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Order) GetCustomerId() string {
+	if x != nil {
+		return x.CustomerId
+	}
+	return ""
+}
+
+func (x *Order) GetRestaurantId() string {
+	if x != nil {
+		return x.RestaurantId
+	}
+	return ""
+}
+
+func (x *Order) GetStatus() OrderStatus {
+	if x != nil {
+		return x.Status
+	}
+	return OrderStatus_ORDER_STATUS_UNSPECIFIED
+}
+
+func (x *Order) GetItems() []*OrderItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *Order) GetTotalMinor() int64 {
+	if x != nil {
+		return x.TotalMinor
+	}
+	return 0
+}
+
+func (x *Order) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *Order) GetDelivery() *DeliveryLocation {
+	if x != nil {
+		return x.Delivery
+	}
+	return nil
+}
+
+func (x *Order) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Order) GetVersion() int32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+// OrderItem is a line as ordered: name and price are a snapshot from the
+// menu at order time.
+type OrderItem struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	MenuItemId     string                 `protobuf:"bytes,1,opt,name=menu_item_id,json=menuItemId,proto3" json:"menu_item_id,omitempty"`
+	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	UnitPriceMinor int64                  `protobuf:"varint,3,opt,name=unit_price_minor,json=unitPriceMinor,proto3" json:"unit_price_minor,omitempty"`
+	Quantity       int32                  `protobuf:"varint,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrderItem) Reset() {
+	*x = OrderItem{}
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderItem) ProtoMessage() {}
+
+func (x *OrderItem) ProtoReflect() protoreflect.Message {
+	mi := &file_deliverit_order_v1_order_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderItem.ProtoReflect.Descriptor instead.
+func (*OrderItem) Descriptor() ([]byte, []int) {
+	return file_deliverit_order_v1_order_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *OrderItem) GetMenuItemId() string {
+	if x != nil {
+		return x.MenuItemId
+	}
+	return ""
+}
+
+func (x *OrderItem) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OrderItem) GetUnitPriceMinor() int64 {
+	if x != nil {
+		return x.UnitPriceMinor
+	}
+	return 0
+}
+
+func (x *OrderItem) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
 var File_deliverit_order_v1_order_proto protoreflect.FileDescriptor
 
 const file_deliverit_order_v1_order_proto_rawDesc = "" +
 	"\n" +
-	"\x1edeliverit/order/v1/order.proto\x12\x12deliverit.order.v1\"o\n" +
+	"\x1edeliverit/order/v1/order.proto\x12\x12deliverit.order.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"o\n" +
 	"\x16ListRestaurantsRequest\x12\x10\n" +
 	"\x03lat\x18\x01 \x01(\x01R\x03lat\x12\x10\n" +
 	"\x03lng\x18\x02 \x01(\x01R\x03lng\x12\x1b\n" +
@@ -251,9 +1019,78 @@ const file_deliverit_order_v1_order_proto_rawDesc = "" +
 	"\vdistance_km\x18\x06 \x01(\x01R\n" +
 	"distanceKm\"[\n" +
 	"\x17ListRestaurantsResponse\x12@\n" +
-	"\vrestaurants\x18\x01 \x03(\v2\x1e.deliverit.order.v1.RestaurantR\vrestaurants2z\n" +
+	"\vrestaurants\x18\x01 \x03(\v2\x1e.deliverit.order.v1.RestaurantR\vrestaurants\"5\n" +
+	"\x0eGetMenuRequest\x12#\n" +
+	"\rrestaurant_id\x18\x01 \x01(\tR\frestaurantId\"m\n" +
+	"\bMenuItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
+	"\vprice_minor\x18\x03 \x01(\x03R\n" +
+	"priceMinor\x12\x1c\n" +
+	"\tavailable\x18\x04 \x01(\bR\tavailable\"\xa1\x01\n" +
+	"\x0fGetMenuResponse\x12>\n" +
+	"\n" +
+	"restaurant\x18\x01 \x01(\v2\x1e.deliverit.order.v1.RestaurantR\n" +
+	"restaurant\x122\n" +
+	"\x05items\x18\x02 \x03(\v2\x1c.deliverit.order.v1.MenuItemR\x05items\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"\xd8\x01\n" +
+	"\x11PlaceOrderRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12#\n" +
+	"\rrestaurant_id\x18\x02 \x01(\tR\frestaurantId\x123\n" +
+	"\x05lines\x18\x03 \x03(\v2\x1d.deliverit.order.v1.OrderLineR\x05lines\x12@\n" +
+	"\bdelivery\x18\x04 \x01(\v2$.deliverit.order.v1.DeliveryLocationR\bdelivery\"I\n" +
+	"\tOrderLine\x12 \n" +
+	"\fmenu_item_id\x18\x01 \x01(\tR\n" +
+	"menuItemId\x12\x1a\n" +
+	"\bquantity\x18\x02 \x01(\x05R\bquantity\"P\n" +
+	"\x10DeliveryLocation\x12\x10\n" +
+	"\x03lat\x18\x01 \x01(\x01R\x03lat\x12\x10\n" +
+	"\x03lng\x18\x02 \x01(\x01R\x03lng\x12\x18\n" +
+	"\aaddress\x18\x03 \x01(\tR\aaddress\"a\n" +
+	"\x12PlaceOrderResponse\x12/\n" +
+	"\x05order\x18\x01 \x01(\v2\x19.deliverit.order.v1.OrderR\x05order\x12\x1a\n" +
+	"\breplayed\x18\x02 \x01(\bR\breplayed\",\n" +
+	"\x0fGetOrderRequest\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\"C\n" +
+	"\x10GetOrderResponse\x12/\n" +
+	"\x05order\x18\x01 \x01(\v2\x19.deliverit.order.v1.OrderR\x05order\"\x9f\x03\n" +
+	"\x05Order\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vcustomer_id\x18\x02 \x01(\tR\n" +
+	"customerId\x12#\n" +
+	"\rrestaurant_id\x18\x03 \x01(\tR\frestaurantId\x127\n" +
+	"\x06status\x18\x04 \x01(\x0e2\x1f.deliverit.order.v1.OrderStatusR\x06status\x123\n" +
+	"\x05items\x18\x05 \x03(\v2\x1d.deliverit.order.v1.OrderItemR\x05items\x12\x1f\n" +
+	"\vtotal_minor\x18\x06 \x01(\x03R\n" +
+	"totalMinor\x12\x1a\n" +
+	"\bcurrency\x18\a \x01(\tR\bcurrency\x12@\n" +
+	"\bdelivery\x18\b \x01(\v2$.deliverit.order.v1.DeliveryLocationR\bdelivery\x129\n" +
+	"\n" +
+	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x18\n" +
+	"\aversion\x18\n" +
+	" \x01(\x05R\aversion\"\x87\x01\n" +
+	"\tOrderItem\x12 \n" +
+	"\fmenu_item_id\x18\x01 \x01(\tR\n" +
+	"menuItemId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12(\n" +
+	"\x10unit_price_minor\x18\x03 \x01(\x03R\x0eunitPriceMinor\x12\x1a\n" +
+	"\bquantity\x18\x04 \x01(\x05R\bquantity*\x94\x02\n" +
+	"\vOrderStatus\x12\x1c\n" +
+	"\x18ORDER_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cORDER_STATUS_PENDING_PAYMENT\x10\x01\x12$\n" +
+	" ORDER_STATUS_AWAITING_RESTAURANT\x10\x02\x12\x1a\n" +
+	"\x16ORDER_STATUS_PREPARING\x10\x03\x12\x16\n" +
+	"\x12ORDER_STATUS_READY\x10\x04\x12\x1a\n" +
+	"\x16ORDER_STATUS_PICKED_UP\x10\x05\x12\x1a\n" +
+	"\x16ORDER_STATUS_DELIVERED\x10\x06\x12\x1a\n" +
+	"\x16ORDER_STATUS_CANCELLED\x10\a\x12\x17\n" +
+	"\x13ORDER_STATUS_FAILED\x10\b2\x82\x03\n" +
 	"\fOrderService\x12j\n" +
-	"\x0fListRestaurants\x12*.deliverit.order.v1.ListRestaurantsRequest\x1a+.deliverit.order.v1.ListRestaurantsResponseB?Z=github.com/Yulian302/deliverit/gen/deliverit/order/v1;orderv1b\x06proto3"
+	"\x0fListRestaurants\x12*.deliverit.order.v1.ListRestaurantsRequest\x1a+.deliverit.order.v1.ListRestaurantsResponse\x12R\n" +
+	"\aGetMenu\x12\".deliverit.order.v1.GetMenuRequest\x1a#.deliverit.order.v1.GetMenuResponse\x12[\n" +
+	"\n" +
+	"PlaceOrder\x12%.deliverit.order.v1.PlaceOrderRequest\x1a&.deliverit.order.v1.PlaceOrderResponse\x12U\n" +
+	"\bGetOrder\x12#.deliverit.order.v1.GetOrderRequest\x1a$.deliverit.order.v1.GetOrderResponseB?Z=github.com/Yulian302/deliverit/gen/deliverit/order/v1;orderv1b\x06proto3"
 
 var (
 	file_deliverit_order_v1_order_proto_rawDescOnce sync.Once
@@ -267,21 +1104,51 @@ func file_deliverit_order_v1_order_proto_rawDescGZIP() []byte {
 	return file_deliverit_order_v1_order_proto_rawDescData
 }
 
-var file_deliverit_order_v1_order_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_deliverit_order_v1_order_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_deliverit_order_v1_order_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_deliverit_order_v1_order_proto_goTypes = []any{
-	(*ListRestaurantsRequest)(nil),  // 0: deliverit.order.v1.ListRestaurantsRequest
-	(*Restaurant)(nil),              // 1: deliverit.order.v1.Restaurant
-	(*ListRestaurantsResponse)(nil), // 2: deliverit.order.v1.ListRestaurantsResponse
+	(OrderStatus)(0),                // 0: deliverit.order.v1.OrderStatus
+	(*ListRestaurantsRequest)(nil),  // 1: deliverit.order.v1.ListRestaurantsRequest
+	(*Restaurant)(nil),              // 2: deliverit.order.v1.Restaurant
+	(*ListRestaurantsResponse)(nil), // 3: deliverit.order.v1.ListRestaurantsResponse
+	(*GetMenuRequest)(nil),          // 4: deliverit.order.v1.GetMenuRequest
+	(*MenuItem)(nil),                // 5: deliverit.order.v1.MenuItem
+	(*GetMenuResponse)(nil),         // 6: deliverit.order.v1.GetMenuResponse
+	(*PlaceOrderRequest)(nil),       // 7: deliverit.order.v1.PlaceOrderRequest
+	(*OrderLine)(nil),               // 8: deliverit.order.v1.OrderLine
+	(*DeliveryLocation)(nil),        // 9: deliverit.order.v1.DeliveryLocation
+	(*PlaceOrderResponse)(nil),      // 10: deliverit.order.v1.PlaceOrderResponse
+	(*GetOrderRequest)(nil),         // 11: deliverit.order.v1.GetOrderRequest
+	(*GetOrderResponse)(nil),        // 12: deliverit.order.v1.GetOrderResponse
+	(*Order)(nil),                   // 13: deliverit.order.v1.Order
+	(*OrderItem)(nil),               // 14: deliverit.order.v1.OrderItem
+	(*timestamppb.Timestamp)(nil),   // 15: google.protobuf.Timestamp
 }
 var file_deliverit_order_v1_order_proto_depIdxs = []int32{
-	1, // 0: deliverit.order.v1.ListRestaurantsResponse.restaurants:type_name -> deliverit.order.v1.Restaurant
-	0, // 1: deliverit.order.v1.OrderService.ListRestaurants:input_type -> deliverit.order.v1.ListRestaurantsRequest
-	2, // 2: deliverit.order.v1.OrderService.ListRestaurants:output_type -> deliverit.order.v1.ListRestaurantsResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2,  // 0: deliverit.order.v1.ListRestaurantsResponse.restaurants:type_name -> deliverit.order.v1.Restaurant
+	2,  // 1: deliverit.order.v1.GetMenuResponse.restaurant:type_name -> deliverit.order.v1.Restaurant
+	5,  // 2: deliverit.order.v1.GetMenuResponse.items:type_name -> deliverit.order.v1.MenuItem
+	8,  // 3: deliverit.order.v1.PlaceOrderRequest.lines:type_name -> deliverit.order.v1.OrderLine
+	9,  // 4: deliverit.order.v1.PlaceOrderRequest.delivery:type_name -> deliverit.order.v1.DeliveryLocation
+	13, // 5: deliverit.order.v1.PlaceOrderResponse.order:type_name -> deliverit.order.v1.Order
+	13, // 6: deliverit.order.v1.GetOrderResponse.order:type_name -> deliverit.order.v1.Order
+	0,  // 7: deliverit.order.v1.Order.status:type_name -> deliverit.order.v1.OrderStatus
+	14, // 8: deliverit.order.v1.Order.items:type_name -> deliverit.order.v1.OrderItem
+	9,  // 9: deliverit.order.v1.Order.delivery:type_name -> deliverit.order.v1.DeliveryLocation
+	15, // 10: deliverit.order.v1.Order.created_at:type_name -> google.protobuf.Timestamp
+	1,  // 11: deliverit.order.v1.OrderService.ListRestaurants:input_type -> deliverit.order.v1.ListRestaurantsRequest
+	4,  // 12: deliverit.order.v1.OrderService.GetMenu:input_type -> deliverit.order.v1.GetMenuRequest
+	7,  // 13: deliverit.order.v1.OrderService.PlaceOrder:input_type -> deliverit.order.v1.PlaceOrderRequest
+	11, // 14: deliverit.order.v1.OrderService.GetOrder:input_type -> deliverit.order.v1.GetOrderRequest
+	3,  // 15: deliverit.order.v1.OrderService.ListRestaurants:output_type -> deliverit.order.v1.ListRestaurantsResponse
+	6,  // 16: deliverit.order.v1.OrderService.GetMenu:output_type -> deliverit.order.v1.GetMenuResponse
+	10, // 17: deliverit.order.v1.OrderService.PlaceOrder:output_type -> deliverit.order.v1.PlaceOrderResponse
+	12, // 18: deliverit.order.v1.OrderService.GetOrder:output_type -> deliverit.order.v1.GetOrderResponse
+	15, // [15:19] is the sub-list for method output_type
+	11, // [11:15] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_deliverit_order_v1_order_proto_init() }
@@ -294,13 +1161,14 @@ func file_deliverit_order_v1_order_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deliverit_order_v1_order_proto_rawDesc), len(file_deliverit_order_v1_order_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   3,
+			NumEnums:      1,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_deliverit_order_v1_order_proto_goTypes,
 		DependencyIndexes: file_deliverit_order_v1_order_proto_depIdxs,
+		EnumInfos:         file_deliverit_order_v1_order_proto_enumTypes,
 		MessageInfos:      file_deliverit_order_v1_order_proto_msgTypes,
 	}.Build()
 	File_deliverit_order_v1_order_proto = out.File

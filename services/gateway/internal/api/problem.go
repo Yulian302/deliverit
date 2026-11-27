@@ -10,10 +10,15 @@ import (
 // Stable error codes, part of the public contract (api/openapi.yaml).
 // Clients switch on these, never on the human-readable detail.
 const (
-	CodeInvalidArgument     = "invalid_argument"
-	CodeUpstreamUnavailable = "upstream_unavailable"
-	CodeUpstreamTimeout     = "upstream_timeout"
-	CodeUpstreamError       = "upstream_error"
+	CodeInvalidArgument      = "invalid_argument"
+	CodeUnauthenticated      = "unauthenticated"
+	CodeForbidden            = "forbidden"
+	CodeNotFound             = "not_found"
+	CodeInternal             = "internal" // same code httpx.Recover uses for panics
+	CodeIdempotencyKeyReused = "idempotency_key_reused"
+	CodeUpstreamUnavailable  = "upstream_unavailable"
+	CodeUpstreamTimeout      = "upstream_timeout"
+	CodeUpstreamError        = "upstream_error"
 )
 
 // problem is an RFC 9457 "problem details" body, plus our stable code.

@@ -4,6 +4,7 @@
 //
 //	gateway              serve the public API, /livez, /readyz
 //	gateway healthcheck  exit 0 if this container's Gateway is ready (Docker HEALTHCHECK)
+//	gateway keygen       print a new random JWT_SIGNING_KEY and exit (needs no config)
 //
 // Configuration comes from environment variables only (see settings).
 package main
@@ -26,10 +27,12 @@ import (
 	"github.com/Yulian302/deliverit/platform/config"
 	"github.com/Yulian302/deliverit/platform/health"
 	"github.com/Yulian302/deliverit/platform/httpx"
+	"github.com/Yulian302/deliverit/platform/identity"
 	"github.com/Yulian302/deliverit/platform/logging"
 	"github.com/Yulian302/deliverit/platform/run"
 	"github.com/Yulian302/deliverit/platform/telemetry"
 	"github.com/Yulian302/deliverit/services/gateway/internal/api"
+	"github.com/Yulian302/deliverit/services/gateway/internal/auth"
 )
 
 // settings is the Gateway's configuration.
@@ -37,6 +40,12 @@ type settings struct {
 	config.Common
 	// OrderURL is the Order service's base URL, e.g. http://order:8081.
 	OrderURL string `env:"ORDER_URL,required,notEmpty"`
+	// JWTSigningKey signs and verifies login tokens: standard base64 of a
+	// 32-byte Ed25519 seed (`gateway keygen` makes one). Required, so a
+	// Gateway can never start unable to check tokens.
+	JWTSigningKey string `env:"JWT_SIGNING_KEY,required,notEmpty"`
+	// JWTTTL is how long a login token stays valid.
+	JWTTTL time.Duration `env:"JWT_TTL" envDefault:"12h"`
 }
 
 const (
@@ -70,8 +79,16 @@ func start(ctx context.Context, args []string, stdout io.Writer) error {
 	switch {
 	case len(args) == 1 && args[0] == "healthcheck":
 		mode = "healthcheck"
+	case len(args) == 1 && args[0] == "keygen":
+		// Before config: generating a key must not require having one.
+		key, err := auth.GenerateSigningKey()
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(stdout, key)
+		return err
 	case len(args) > 0:
-		return fmt.Errorf("unexpected arguments %q (want none, or: healthcheck)", args)
+		return fmt.Errorf("unexpected arguments %q (want none, or: healthcheck, keygen)", args)
 	}
 	var cfg settings
 	if err := config.Load(&cfg); err != nil {
@@ -110,6 +127,12 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	// problem+json, which is better than being taken out of rotation.
 	hc := health.New()
 
+	key, err := auth.ParseSigningKey(cfg.JWTSigningKey)
+	if err != nil {
+		return err
+	}
+	issuer := auth.NewIssuer(key, cfg.JWTTTL, time.Now)
+
 	order, err := newOrderClient(cfg.OrderURL)
 	if err != nil {
 		return err
@@ -119,6 +142,11 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	// Method-specific patterns: other methods get 405 from the mux.
 	app := http.NewServeMux()
 	app.Handle("GET /v1/restaurants", telemetry.Route(api.NewRestaurantsHandler(order, log)))
+	app.Handle("POST /v1/auth/demo-login", telemetry.Route(api.NewDemoLoginHandler(issuer)))
+	app.Handle("GET /v1/auth/me", telemetry.Route(api.RequireRole()(api.NewMeHandler())))
+	app.Handle("GET /v1/restaurants/{id}/menu", telemetry.Route(api.NewMenuHandler(order, log)))
+	app.Handle("POST /v1/orders", telemetry.Route(api.RequireRole(identity.RoleCustomer)(api.NewPlaceOrderHandler(order, log))))
+	app.Handle("GET /v1/orders/{id}", telemetry.Route(api.RequireRole()(api.NewGetOrderHandler(order, log))))
 
 	// Order matters (first = outermost):
 	//   telemetry  starts the span and puts trace IDs in ctx, so everything
@@ -127,11 +155,14 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 	//   RequestID  next, so the access log line carries request_id;
 	//   AccessLog  outside Recover, so a panic is still logged (as a 500);
 	//   Recover    turns panics into 500 problem+json;
+	//   Authenticate verifies a bearer token (if any) and puts the caller's
+	//              identity in ctx; routes that need one add RequireRole;
 	//   Deadline   innermost, closest to the handler that uses the ctx.
 	handler := telemetry.PublicHTTPHandler(httpx.Chain(app,
 		httpx.RequestID,
 		httpx.AccessLog(log),
 		httpx.Recover(log),
+		api.Authenticate(issuer),
 		httpx.Deadline(requestDeadline),
 	), cfg.ServiceName)
 
@@ -146,6 +177,9 @@ func serve(ctx context.Context, cfg settings, log *slog.Logger) (err error) {
 //   - No overall client timeout: each call is bounded by the request's
 //     context (5s Deadline middleware), and Connect sends the remaining time
 //     to Order in a header, so Order stops when the Gateway gives up.
+//   - identity.Interceptor sends the verified caller (from ctx) to Order in
+//     Deliverit-* headers. It builds them from ctx only: headers from the
+//     public request are never copied onto the RPC.
 //   - otelconnect creates the CLIENT span and injects traceparent, so Order's
 //     server span joins this trace. (No otelhttp transport as well: that
 //     would add a second, redundant span per call.)
@@ -160,5 +194,5 @@ func newOrderClient(baseURL string) (orderv1connect.OrderServiceClient, error) {
 		Protocols:   protocols,
 		DialContext: (&net.Dialer{Timeout: upstreamDialTimeout}).DialContext,
 	}}
-	return orderv1connect.NewOrderServiceClient(httpClient, baseURL, connect.WithInterceptors(tracing)), nil
+	return orderv1connect.NewOrderServiceClient(httpClient, baseURL, connect.WithInterceptors(tracing, identity.Interceptor())), nil
 }

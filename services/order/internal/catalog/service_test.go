@@ -6,6 +6,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/Yulian302/deliverit/services/order/internal/catalog"
 )
 
@@ -15,6 +17,15 @@ type fakeStore struct {
 	got   catalog.NearbyQuery
 	rs    []catalog.Restaurant
 	err   error
+
+	menuRestaurant catalog.Restaurant
+	menuItems      []catalog.MenuItem
+	menuErr        error
+}
+
+func (f *fakeStore) Menu(_ context.Context, _ uuid.UUID) (catalog.Restaurant, []catalog.MenuItem, error) {
+	f.calls++
+	return f.menuRestaurant, f.menuItems, f.menuErr
 }
 
 func (f *fakeStore) ListNear(_ context.Context, q catalog.NearbyQuery) ([]catalog.Restaurant, error) {
@@ -99,5 +110,22 @@ func TestListNearby_ReturnsStoreResults(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Name != "A" || got[1].Name != "B" {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestMenu_UnknownRestaurantIsNotFound(t *testing.T) {
+	svc := catalog.NewService(&fakeStore{menuErr: catalog.ErrNotFound})
+	if _, _, err := svc.Menu(context.Background(), uuid.New()); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("err = %v; want ErrNotFound", err)
+	}
+}
+
+func TestMenu_ReturnsStoreResult(t *testing.T) {
+	r := catalog.Restaurant{ID: uuid.New(), Name: "Fake Pho"}
+	items := []catalog.MenuItem{{ID: uuid.New(), Name: "Pho bo", PriceMinor: 21000, Available: true}}
+	svc := catalog.NewService(&fakeStore{menuRestaurant: r, menuItems: items})
+	gotR, gotItems, err := svc.Menu(context.Background(), r.ID)
+	if err != nil || gotR.Name != r.Name || len(gotItems) != 1 || gotItems[0] != items[0] {
+		t.Fatalf("Menu = %+v, %+v, %v", gotR, gotItems, err)
 	}
 }
