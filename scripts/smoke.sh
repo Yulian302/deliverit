@@ -5,8 +5,9 @@
 #   1. the Gateway becomes ready;
 #   2. a real search returns the 10 seeded restaurants, nearest first;
 #   3. bad input is a 400 problem+json, not a 500;
-#   4. that one request is ONE trace in Tempo: gateway → order → postgres;
-#   5. its log lines from both services are in Loki, linked by trace ID.
+#   4. demo login gives a token the Gateway accepts, and no token is a 401;
+#   5. the search request is ONE trace in Tempo: gateway → order → postgres;
+#   6. its log lines from both services are in Loki, linked by trace ID.
 #
 # Needs curl and jq. Exits non-zero, with the reason, on the first failure.
 set -euo pipefail
@@ -61,7 +62,25 @@ grep -qi '^content-type: application/problem+json' "$tmp/bad.headers" || fail "n
 pass "near=abc → 400 invalid_argument (problem+json)"
 
 # ── 4 ──────────────────────────────────────────────────────────────────────
-step "4. One trace in Tempo: gateway → order → postgres"
+step "4. Demo login and token check"
+customer=0193a1b1-0000-7000-8000-0000000000c1 # Olena, a seeded demo customer
+status=$(curl -sS -o "$tmp/login.json" -w '%{http_code}' -H 'Content-Type: application/json' \
+  -d "{\"userId\":\"$customer\"}" "$GATEWAY/v1/auth/demo-login")
+[[ $status == 200 ]] || fail "demo-login: status $status, want 200: $(cat "$tmp/login.json")"
+token=$(jq -r .token "$tmp/login.json")
+[[ -n $token && $token != null ]] || fail "demo-login: no token in the response"
+pass "POST /v1/auth/demo-login → 200, token for $(jq -r .user.name "$tmp/login.json")"
+status=$(curl -sS -o "$tmp/me.json" -w '%{http_code}' -H "Authorization: Bearer $token" "$GATEWAY/v1/auth/me")
+[[ $status == 200 ]] || fail "me with token: status $status, want 200"
+[[ $(jq -r .role "$tmp/me.json") == customer ]] || fail "me: role $(jq -r .role "$tmp/me.json"), want customer"
+pass "GET /v1/auth/me with the token → 200, role customer"
+status=$(curl -sS -o "$tmp/anon.json" -w '%{http_code}' "$GATEWAY/v1/auth/me")
+[[ $status == 401 ]] || fail "me without token: status $status, want 401"
+[[ $(jq -r .code "$tmp/anon.json") == unauthenticated ]] || fail "me without token: code $(jq -r .code "$tmp/anon.json"), want unauthenticated"
+pass "GET /v1/auth/me without a token → 401 unauthenticated"
+
+# ── 5 ──────────────────────────────────────────────────────────────────────
+step "5. One trace in Tempo: gateway → order → postgres"
 # Spans are exported in batches every few seconds: poll until all are there.
 # Each span as "service|kind|name" (first line of the name: SQL spans are
 # named after the query).
@@ -89,8 +108,8 @@ pass "gateway  CLIENT  OrderService/ListRestaurants"
 pass "order    SERVER  OrderService/ListRestaurants"
 pass "order    CLIENT  SELECT (postgres)"
 
-# ── 5 ──────────────────────────────────────────────────────────────────────
-step "5. Logs in Loki, linked to the trace"
+# ── 6 ──────────────────────────────────────────────────────────────────────
+step "6. Logs in Loki, linked to the trace"
 logs_of_trace() {
   local now; now=$(date +%s)
   curl -fsS -G "$LOKI/loki/api/v1/query_range" \

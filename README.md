@@ -31,6 +31,15 @@ Try the API yourself:
 curl -s 'http://localhost:8080/v1/restaurants?near=50.4501,30.5234' | jq
 ```
 
+Log in as a demo user (no password; the users are listed in [users.go](services/gateway/internal/auth/users.go)) and use the token:
+
+```bash
+token=$(curl -s -H 'Content-Type: application/json' \
+  -d '{"userId":"0193a1b1-0000-7000-8000-0000000000c1"}' \
+  http://localhost:8080/v1/auth/demo-login | jq -r .token)
+curl -s -H "Authorization: Bearer $token" http://localhost:8080/v1/auth/me | jq
+```
+
 `make logs` follows every service (`make logs svc=order` for one), and `make ps` shows container health.
 
 ## Local URLs

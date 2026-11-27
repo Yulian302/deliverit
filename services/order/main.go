@@ -26,6 +26,7 @@ import (
 	"github.com/Yulian302/deliverit/platform/config"
 	"github.com/Yulian302/deliverit/platform/health"
 	"github.com/Yulian302/deliverit/platform/httpx"
+	"github.com/Yulian302/deliverit/platform/identity"
 	"github.com/Yulian302/deliverit/platform/logging"
 	"github.com/Yulian302/deliverit/platform/pg"
 	"github.com/Yulian302/deliverit/platform/rpcx"
@@ -162,9 +163,10 @@ func catalogRoute(pool *pgxpool.Pool, log *slog.Logger) (string, http.Handler, e
 	svc := catalog.NewService(catalog.NewPostgresStore(pool))
 	path, h := orderv1connect.NewOrderServiceHandler(
 		catalog.NewHandler(svc, log),
-		// First = outermost: tracing starts the span, then the access log
-		// runs inside it, so its line carries trace_id.
-		connect.WithInterceptors(tracing, rpcx.AccessLog(log)),
+		// First = outermost: tracing starts the span; identity reads the
+		// caller from the Gateway's Deliverit-* headers into ctx; the access
+		// log runs inside the span, so its line carries trace_id.
+		connect.WithInterceptors(tracing, identity.Interceptor(), rpcx.AccessLog(log)),
 	)
 	return path, h, nil
 }

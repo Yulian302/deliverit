@@ -152,6 +152,8 @@ services:
       SERVICE_NAME: gateway
       HTTP_ADDR: :8080
       ORDER_URL: http://order:8081
+      # DEV ONLY — never use this key outside local development.
+      JWT_SIGNING_KEY: stuTVhMiUuKy2nRrKElPx91CEugsSu7y1ruqOWqSFcU=
     ports: ["8080:8080"]
     depends_on:
       # Started, not healthy: the Gateway copes with Order being down (503

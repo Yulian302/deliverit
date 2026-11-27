@@ -11,6 +11,10 @@ import (
 // Clients switch on these, never on the human-readable detail.
 const (
 	CodeInvalidArgument     = "invalid_argument"
+	CodeUnauthenticated     = "unauthenticated"
+	CodeForbidden           = "forbidden"
+	CodeNotFound            = "not_found"
+	CodeInternal            = "internal" // same code httpx.Recover uses for panics
 	CodeUpstreamUnavailable = "upstream_unavailable"
 	CodeUpstreamTimeout     = "upstream_timeout"
 	CodeUpstreamError       = "upstream_error"
