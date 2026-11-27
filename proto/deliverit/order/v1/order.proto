@@ -9,10 +9,29 @@ package deliverit.order.v1;
 
 option go_package = "github.com/Yulian302/deliverit/gen/deliverit/order/v1;orderv1";
 
+import "google/protobuf/timestamp.proto";
+
 service OrderService {
   // ListRestaurants returns restaurants near a point, nearest first.
   // Errors: INVALID_ARGUMENT for out-of-range coordinates, radius or limit.
   rpc ListRestaurants(ListRestaurantsRequest) returns (ListRestaurantsResponse);
+
+  // GetMenu returns a restaurant and everything it sells.
+  // Errors: INVALID_ARGUMENT for a malformed ID, NOT_FOUND for an unknown restaurant.
+  rpc GetMenu(GetMenuRequest) returns (GetMenuResponse);
+
+  // PlaceOrder creates an order in PENDING_PAYMENT. Callers: customers only.
+  // Idempotent per (customer, idempotency_key): a repeat with the same request
+  // returns the original order with replayed = true.
+  // Errors: INVALID_ARGUMENT (bad input, unknown or unavailable items,
+  // delivery too far), ALREADY_EXISTS (key reused with a different request),
+  // UNAUTHENTICATED (no caller), PERMISSION_DENIED (not a customer).
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+
+  // GetOrder returns an order the caller may see: its customer, staff of its
+  // restaurant, or ops. Errors: NOT_FOUND (missing, or not visible to the
+  // caller: the two are indistinguishable on purpose), UNAUTHENTICATED.
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
 }
 
 message ListRestaurantsRequest {
@@ -41,4 +60,108 @@ message Restaurant {
 message ListRestaurantsResponse {
   // Nearest first.
   repeated Restaurant restaurants = 1;
+}
+
+message GetMenuRequest {
+  // UUID.
+  string restaurant_id = 1;
+}
+
+message MenuItem {
+  // UUID.
+  string id = 1;
+  string name = 2;
+  // Price in minor units (kopecks) of the menu's currency.
+  int64 price_minor = 3;
+  // False: listed but can't be ordered right now.
+  bool available = 4;
+}
+
+message GetMenuResponse {
+  // distance_km is not set.
+  Restaurant restaurant = 1;
+  repeated MenuItem items = 2;
+  // ISO 4217 code, e.g. "UAH".
+  string currency = 3;
+}
+
+message PlaceOrderRequest {
+  // Client-chosen, 1-64 chars of [A-Za-z0-9_-], unique per customer.
+  string idempotency_key = 1;
+  // UUID.
+  string restaurant_id = 2;
+  // 1-20 lines, each menu item at most once.
+  repeated OrderLine lines = 3;
+  DeliveryLocation delivery = 4;
+}
+
+message OrderLine {
+  // UUID of an available item of the order's restaurant.
+  string menu_item_id = 1;
+  // 1-20.
+  int32 quantity = 2;
+}
+
+message DeliveryLocation {
+  // Latitude in degrees, within 10 km of the restaurant.
+  double lat = 1;
+  // Longitude in degrees.
+  double lng = 2;
+  // Free text for the courier (street, flat, door code).
+  string address = 3;
+}
+
+message PlaceOrderResponse {
+  Order order = 1;
+  // True when this is a repeat of an earlier request with the same key: the
+  // order is the original response, not necessarily its current state.
+  bool replayed = 2;
+}
+
+message GetOrderRequest {
+  // UUID.
+  string order_id = 1;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+// OrderStatus follows the order state machine in docs/SPEC.md §5.
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_PENDING_PAYMENT = 1;
+  ORDER_STATUS_AWAITING_RESTAURANT = 2;
+  ORDER_STATUS_PREPARING = 3;
+  ORDER_STATUS_READY = 4;
+  ORDER_STATUS_PICKED_UP = 5;
+  ORDER_STATUS_DELIVERED = 6;
+  ORDER_STATUS_CANCELLED = 7;
+  ORDER_STATUS_FAILED = 8;
+}
+
+message Order {
+  // UUID (v7).
+  string id = 1;
+  string customer_id = 2;
+  string restaurant_id = 3;
+  OrderStatus status = 4;
+  repeated OrderItem items = 5;
+  // Sum of unit_price_minor * quantity, in minor units of currency.
+  int64 total_minor = 6;
+  // ISO 4217 code, e.g. "UAH".
+  string currency = 7;
+  DeliveryLocation delivery = 8;
+  google.protobuf.Timestamp created_at = 9;
+  // Starts at 1, bumped on every change.
+  int32 version = 10;
+}
+
+// OrderItem is a line as ordered: name and price are a snapshot from the
+// menu at order time.
+message OrderItem {
+  string menu_item_id = 1;
+  string name = 2;
+  int64 unit_price_minor = 3;
+  int32 quantity = 4;
 }

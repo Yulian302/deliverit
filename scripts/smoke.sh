@@ -6,8 +6,11 @@
 #   2. a real search returns the 10 seeded restaurants, nearest first;
 #   3. bad input is a 400 problem+json, not a 500;
 #   4. demo login gives a token the Gateway accepts, and no token is a 401;
-#   5. the search request is ONE trace in Tempo: gateway → order → postgres;
-#   6. its log lines from both services are in Loki, linked by trace ID.
+#   5. a customer reads a menu and places an order; 10 racing duplicates with
+#      one Idempotency-Key make ONE order; key reuse is a 422; another
+#      customer can't see the order;
+#   6. the search request is ONE trace in Tempo: gateway → order → postgres;
+#   7. its log lines from both services are in Loki, linked by trace ID.
 #
 # Needs curl and jq. Exits non-zero, with the reason, on the first failure.
 set -euo pipefail
@@ -80,7 +83,47 @@ status=$(curl -sS -o "$tmp/anon.json" -w '%{http_code}' "$GATEWAY/v1/auth/me")
 pass "GET /v1/auth/me without a token → 401 unauthenticated"
 
 # ── 5 ──────────────────────────────────────────────────────────────────────
-step "5. One trace in Tempo: gateway → order → postgres"
+step "5. Menu, order, and idempotency under racing duplicates"
+restaurant=0193a1b0-0000-7000-8000-000000000001 # Khreshchatyk Kitchen
+chicken=0193a1b2-0000-7000-8000-000000000101
+status=$(curl -sS -o "$tmp/menu.json" -w '%{http_code}' "$GATEWAY/v1/restaurants/$restaurant/menu")
+[[ $status == 200 ]] || fail "menu: status $status, want 200"
+[[ $(jq '.items | length' "$tmp/menu.json") == 3 ]] || fail "menu: $(jq '.items | length' "$tmp/menu.json") items, want 3"
+pass "GET menu → 200, 3 items"
+
+order_body() { # $1 = quantity
+  printf '{"restaurantId":"%s","items":[{"menuItemId":"%s","quantity":%s}],"delivery":{"lat":50.4501,"lng":30.5234,"address":"Khreshchatyk 22"}}' \
+    "$restaurant" "$chicken" "$1"
+}
+place() { # $1 = key, $2 = quantity, $3 = output file; prints the status
+  curl -sS -o "$3" -w '%{http_code}' -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: $1" -d "$(order_body "$2")" "$GATEWAY/v1/orders"
+}
+key="smoke-$(date +%s%N)"
+for i in $(seq 1 10); do place "$key" 2 "$tmp/race-$i.json" > "$tmp/race-$i.status" & done
+wait
+for i in $(seq 1 10); do
+  [[ $(cat "$tmp/race-$i.status") == 202 ]] || fail "racing duplicate $i: status $(cat "$tmp/race-$i.status"), want 202"
+done
+ids=$(jq -r .id "$tmp"/race-*.json | sort -u)
+[[ $(wc -l <<< "$ids") == 1 ]] || fail "10 duplicates made $(wc -l <<< "$ids") orders: $ids"
+order_id=$ids
+[[ $(jq -r .status "$tmp/race-1.json") == PENDING_PAYMENT ]] || fail "order status $(jq -r .status "$tmp/race-1.json"), want PENDING_PAYMENT"
+pass "10 racing POSTs with one Idempotency-Key → all 202, one order ($order_id)"
+
+status=$(place "$key" 3 "$tmp/reuse.json")
+[[ $status == 422 && $(jq -r .code "$tmp/reuse.json") == idempotency_key_reused ]] || fail "key reuse: status $status, want 422 idempotency_key_reused"
+pass "same key, different quantity → 422 idempotency_key_reused"
+
+status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "$GATEWAY/v1/orders/$order_id")
+[[ $status == 200 ]] || fail "own order: status $status, want 200"
+other=$(curl -sS -H 'Content-Type: application/json' -d '{"userId":"0193a1b1-0000-7000-8000-0000000000c2"}' "$GATEWAY/v1/auth/demo-login" | jq -r .token)
+status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $other" "$GATEWAY/v1/orders/$order_id")
+[[ $status == 404 ]] || fail "another customer's order: status $status, want 404"
+pass "GET the order: 200 for its customer, 404 for another"
+
+# ── 6 ──────────────────────────────────────────────────────────────────────
+step "6. One trace in Tempo: gateway → order → postgres"
 # Spans are exported in batches every few seconds: poll until all are there.
 # Each span as "service|kind|name" (first line of the name: SQL spans are
 # named after the query).
@@ -108,8 +151,8 @@ pass "gateway  CLIENT  OrderService/ListRestaurants"
 pass "order    SERVER  OrderService/ListRestaurants"
 pass "order    CLIENT  SELECT (postgres)"
 
-# ── 6 ──────────────────────────────────────────────────────────────────────
-step "6. Logs in Loki, linked to the trace"
+# ── 7 ──────────────────────────────────────────────────────────────────────
+step "7. Logs in Loki, linked to the trace"
 logs_of_trace() {
   local now; now=$(date +%s)
   curl -fsS -G "$LOKI/loki/api/v1/query_range" \

@@ -1,17 +1,13 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-
-	"connectrpc.com/connect"
 
 	orderv1 "github.com/Yulian302/deliverit/gen/deliverit/order/v1"
 	"github.com/Yulian302/deliverit/gen/deliverit/order/v1/orderv1connect"
@@ -103,51 +99,4 @@ func parseRestaurantsQuery(q url.Values) (*orderv1.ListRestaurantsRequest, error
 		req.Limit = int32(limit)
 	}
 	return req, nil
-}
-
-// writeUpstreamError turns a failed call to Order into the response the
-// public sees. Only InvalidArgument passes Order's message through: Order
-// wrote it for the caller ("lat 91 must be within [-90, 90]"). Every other
-// message stays in our logs.
-func writeUpstreamError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err error) {
-	ctx := r.Context()
-	switch {
-	case errors.Is(ctx.Err(), context.Canceled):
-		// The client hung up: nobody is listening for a response.
-		return
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		// Our own 5s request budget ran out, wherever the call was.
-		WriteProblem(w, http.StatusGatewayTimeout, CodeUpstreamTimeout, "the restaurant service did not answer in time")
-	case connect.CodeOf(err) == connect.CodeUnavailable, isDialFailure(err):
-		// Checked before DeadlineExceeded: Connect reports a *connect*
-		// timeout (host dropping packets, cut short by our dial timeout) as
-		// DeadlineExceeded, but that means "couldn't reach Order", not "Order
-		// was too slow".
-		log.WarnContext(ctx, "order unavailable", slog.Any("error", err))
-		WriteProblem(w, http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the restaurant service is unavailable, try again later")
-	case connect.CodeOf(err) == connect.CodeDeadlineExceeded:
-		WriteProblem(w, http.StatusGatewayTimeout, CodeUpstreamTimeout, "the restaurant service did not answer in time")
-	case connect.CodeOf(err) == connect.CodeInvalidArgument:
-		WriteProblem(w, http.StatusBadRequest, CodeInvalidArgument, upstreamMessage(err))
-	default:
-		log.ErrorContext(ctx, "order call failed", slog.Any("error", err))
-		WriteProblem(w, http.StatusBadGateway, CodeUpstreamError, "the restaurant service failed")
-	}
-}
-
-// isDialFailure reports whether err comes from failing to open a connection
-// (refused, unreachable, or connect timed out). Connect keeps the network
-// error underneath its own, so errors.As can find it.
-func isDialFailure(err error) bool {
-	var op *net.OpError
-	return errors.As(err, &op) && op.Op == "dial"
-}
-
-// upstreamMessage is the message of a Connect error without its
-// "invalid_argument: " code prefix.
-func upstreamMessage(err error) string {
-	if ce := new(connect.Error); errors.As(err, &ce) {
-		return ce.Message()
-	}
-	return err.Error()
 }

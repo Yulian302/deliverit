@@ -117,3 +117,36 @@ func TestRPC_EmptyResult(t *testing.T) {
 		t.Errorf("got %d restaurants, want 0", n)
 	}
 }
+
+func TestRPC_GetMenu_BadIDIsInvalidArgument(t *testing.T) {
+	client, _ := rpcClient(t, &fakeStore{})
+	_, err := client.GetMenu(context.Background(), &orderv1.GetMenuRequest{RestaurantId: "nope"})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("err = %v; want invalid_argument", err)
+	}
+}
+
+func TestRPC_GetMenu_NotFound(t *testing.T) {
+	client, _ := rpcClient(t, &fakeStore{menuErr: catalog.ErrNotFound})
+	_, err := client.GetMenu(context.Background(), &orderv1.GetMenuRequest{RestaurantId: uuid.NewString()})
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("err = %v; want not_found", err)
+	}
+}
+
+func TestRPC_GetMenu_MapsFields(t *testing.T) {
+	r := catalog.Restaurant{ID: uuid.New(), Name: "Fake Pho", Location: catalog.Point{Lat: 50.44, Lng: 30.54}, PrepMinutes: 12}
+	item := catalog.MenuItem{ID: uuid.New(), Name: "Pho bo", PriceMinor: 21000, Available: false}
+	client, _ := rpcClient(t, &fakeStore{menuRestaurant: r, menuItems: []catalog.MenuItem{item}})
+	resp, err := client.GetMenu(context.Background(), &orderv1.GetMenuRequest{RestaurantId: r.ID.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetCurrency() != "UAH" || resp.GetRestaurant().GetName() != "Fake Pho" || resp.GetRestaurant().GetPrepMinutes() != 12 {
+		t.Errorf("restaurant/currency = %v / %q", resp.GetRestaurant(), resp.GetCurrency())
+	}
+	got := resp.GetItems()
+	if len(got) != 1 || got[0].GetId() != item.ID.String() || got[0].GetPriceMinor() != 21000 || got[0].GetAvailable() {
+		t.Errorf("items = %v", got)
+	}
+}

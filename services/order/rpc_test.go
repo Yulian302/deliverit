@@ -43,7 +43,41 @@ func TestOrder_ServesListRestaurants(t *testing.T) {
 	}
 }
 
-// tracedCall serves catalogRoute with an in-memory tracer and our real
+// OrderService is served by two packages (catalog, ordering). Every RPC must
+// reach a real handler, never the embedded Unimplemented stub. Each call
+// below fails on input or identity before touching the (absent) database.
+func TestOrder_ServesEveryRPC(t *testing.T) {
+	url, _, _ := startOrder(t, "postgres://u:p@127.0.0.1:1/db")
+	client := orderv1connect.NewOrderServiceClient(h2cClient(), url)
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"GetMenu": func() error {
+			_, err := client.GetMenu(ctx, &orderv1.GetMenuRequest{RestaurantId: "nope"})
+			return err
+		},
+		"PlaceOrder": func() error {
+			_, err := client.PlaceOrder(ctx, &orderv1.PlaceOrderRequest{})
+			return err
+		},
+		"GetOrder": func() error {
+			_, err := client.GetOrder(ctx, &orderv1.GetOrderRequest{})
+			return err
+		},
+	}
+	want := map[string]connect.Code{
+		"GetMenu":    connect.CodeInvalidArgument,
+		"PlaceOrder": connect.CodeUnauthenticated,
+		"GetOrder":   connect.CodeUnauthenticated,
+	}
+	for name, call := range calls {
+		if got := connect.CodeOf(call()); got != want[name] {
+			t.Errorf("%s: code %v; want %v from the real handler", name, got, want[name])
+		}
+	}
+}
+
+// tracedCall serves rpcRoute with an in-memory tracer and our real
 // logger, makes one call from inside a caller span (propagated in the
 // traceparent header, as the Gateway will), and returns the caller span, the
 // recorded spans and the service's log output.
@@ -66,7 +100,7 @@ func tracedCall(t *testing.T) (caller trace.Span, spans tracetest.SpanStubs, log
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	path, handler, err := catalogRoute(pool, log)
+	path, handler, err := rpcRoute(pool, log)
 	if err != nil {
 		t.Fatal(err)
 	}

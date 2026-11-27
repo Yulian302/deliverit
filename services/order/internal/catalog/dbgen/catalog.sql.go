@@ -11,6 +11,71 @@ import (
 	"github.com/google/uuid"
 )
 
+const getRestaurant = `-- name: GetRestaurant :one
+SELECT id, name, lat, lng, prep_minutes FROM restaurants WHERE id = $1
+`
+
+type GetRestaurantRow struct {
+	ID          uuid.UUID
+	Name        string
+	Lat         float64
+	Lng         float64
+	PrepMinutes int32
+}
+
+func (q *Queries) GetRestaurant(ctx context.Context, id uuid.UUID) (GetRestaurantRow, error) {
+	row := q.db.QueryRow(ctx, getRestaurant, id)
+	var i GetRestaurantRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Lat,
+		&i.Lng,
+		&i.PrepMinutes,
+	)
+	return i, err
+}
+
+const listMenuItems = `-- name: ListMenuItems :many
+SELECT id, name, price_minor, available
+FROM menu_items
+WHERE restaurant_id = $1
+ORDER BY id
+`
+
+type ListMenuItemsRow struct {
+	ID         uuid.UUID
+	Name       string
+	PriceMinor int64
+	Available  bool
+}
+
+// A restaurant's menu, in a stable order.
+func (q *Queries) ListMenuItems(ctx context.Context, restaurantID uuid.UUID) ([]ListMenuItemsRow, error) {
+	rows, err := q.db.Query(ctx, listMenuItems, restaurantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMenuItemsRow
+	for rows.Next() {
+		var i ListMenuItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.PriceMinor,
+			&i.Available,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRestaurantsNear = `-- name: ListRestaurantsNear :many
 
 SELECT id, name, lat, lng, prep_minutes, distance_km
