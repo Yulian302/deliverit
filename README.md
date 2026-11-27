@@ -84,6 +84,34 @@ The first run creates each service's `.env` from its committed `.env.example`. `
 | [tools/](tools/) | Pinned dev tools (buf, protoc plugins, goose) in their own Go module |
 | [docs/](docs/) | Design spec and implementation plans |
 
+## Milestones
+
+The MVP is built in thin vertical slices. Each one runs end to end before the next one starts.
+
+| # | Slice | Status |
+|---|---|---|
+| 1 | Walking skeleton | ✅ Done |
+| 2 | Place order + payment: idempotency keys, outbox → Kafka, async payment, circuit breaker | Next |
+| 3 | Courier location: GPS ingest, Redis GEO, live fan-out | Planned |
+| 4 | Simulator + ops map | Planned |
+| 5 | Dispatch: offers with expiry, atomic accept, leader lease | Planned |
+| 6 | Web app: customer, restaurant and courier views | Planned |
+| 7 | Resilience + observability pass: timeouts, rate limiting, DLQ, dashboards, SLOs | Planned |
+| 8 | Load + chaos tests, recorded numbers, ADRs | Planned |
+
+### Slice 1: walking skeleton
+
+One real request runs through every layer, can be followed as a single trace, and is checked automatically on every push.
+
+`GET /v1/restaurants?near=lat,lng` goes Gateway → Order (Connect RPC) → Postgres and returns the seeded restaurants, nearest first. In Grafana it is one trace with 7 spans (see the screenshot above), and both services' log lines for it carry the same `trace_id`.
+
+- **Shared platform ([platform/](platform/)):** environment config validated at startup, structured JSON logging with trace IDs, OpenTelemetry traces/metrics/logs over OTLP, `/livez` and `/readyz` probes, an HTTP server with request-ID and tracing middleware, graceful shutdown, a Postgres pool with migrations and readiness checks, and shared Connect RPC plumbing.
+- **Order service:** owns the restaurant catalog. Migrations (table, location index, seed data), sqlc-generated queries, the `ListRestaurants` RPC, and a `migrate` subcommand.
+- **Gateway:** the public HTTP API, described in [api/openapi.yaml](api/openapi.yaml). Errors are `application/problem+json`, so bad input is a 400, never a 500.
+- **Contract:** the RPC is defined in protobuf ([proto/](proto/)), and Go code is generated from it with buf into [gen/](gen/).
+- **Local stack:** Docker Compose with Postgres, Redis, Kafka, Kafka UI and Grafana (Tempo, Loki, Prometheus), plus both services and a one-off migration job. Every image is pinned to an exact version. `make smoke` checks the search, the 400 case, the full trace in Tempo and the logs in Loki.
+- **CI:** golangci-lint, buf lint and buf breaking (catches incompatible proto changes), unit tests, integration tests against a real Postgres, a check that generated code is up to date, govulncheck, and the end-to-end smoke test. It runs once per push: branches without a PR get their own run, and a branch with an open PR is covered by the PR's run.
+
 ## Design
 
 [docs/SPEC.md](docs/SPEC.md) is the full MVP design: services, events, state machines, failure handling, and the acceptance criteria each slice works toward.
