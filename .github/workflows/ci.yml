@@ -2,9 +2,14 @@
 # so "green on my laptop" and "green in CI" mean the same thing.
 name: ci
 
+# When CI runs — exactly once per push:
+#   push to main              → run (checks what actually landed)
+#   push to a branch, no PR   → run (feedback before you open a PR)
+#   push to a branch with PR  → skipped by `gate`; the pull_request run covers it
+#   pull_request into main    → run, on the merge result (what would land on main)
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
@@ -18,11 +23,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether this run does any work (see the table at the top).
+  # Every other job needs it, so a skipped run is a few seconds, not 6 jobs.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read # to look up open PRs for the pushed branch
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          run=true
+          if [[ $EVENT == push && $BRANCH != main ]]; then
+            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main \
+              --state open --json number --jq '.[0].number // empty')
+            if [[ -n $pr ]]; then
+              echo "::notice::$BRANCH has open PR #$pr; its pull_request run covers this push"
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   lint:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # Full history: `buf breaking` compares against the PR's base commit.
+      # Full history: `buf breaking` compares against an earlier commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -40,8 +74,14 @@ jobs:
       - name: buf breaking (against the PR base)
         if: github.event_name == 'pull_request'
         run: go tool -modfile=tools/go.mod buf breaking --against ".git#ref=${{ github.event.pull_request.base.sha }}"
+      # A branch without a PR: compare against where it forked from main.
+      - name: buf breaking (against the fork point from main)
+        if: github.event_name == 'push' && github.ref_name != 'main'
+        run: go tool -modfile=tools/go.mod buf breaking --against ".git#ref=$(git merge-base HEAD origin/main)"
 
   test:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -55,6 +95,8 @@ jobs:
       - run: make test
 
   test-integration:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -69,6 +111,8 @@ jobs:
       - run: make test-int
 
   generated:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -83,6 +127,8 @@ jobs:
       - run: make gen-check
 
   vuln:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -96,6 +142,8 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   e2e:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
